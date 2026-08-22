@@ -17,8 +17,7 @@ import type { IFramesService } from '../interfaces/service/IFrameService';
 
 /**
  * Thin HTTP layer: parses/validates input (via DTO decorators + the global
- * ValidationPipe), delegates to the service, returns the result. No business
- * logic lives here.
+ * ValidationPipe), delegates to the service, returns the result. 
  */
 @Controller('frames')
 export class FramesController {
@@ -33,10 +32,4 @@ export class FramesController {
     return this.framesService.analyzeFrame(dto);
   }
 
-  @Get(':id')
-  async getResult(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<EngagementResultDto> {
-    return this.framesService.getResult(id);
-  }
 }

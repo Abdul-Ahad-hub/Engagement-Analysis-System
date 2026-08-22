@@ -1,11 +1,12 @@
 import { randomUUID } from 'crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { IFramesService } from '../interfaces/service/IFrameService';
-import { IFramesRepository } from '../interfaces/service/IFrameR';;
-import { IModelClient } from '../interfaces/service/IFrameService';;
-import { ITemporaryStorageService } from '../../temp-storage/interface/temporary-storage.interface';
-import { FrameDTO } from '../dto/frame.dto';
-import { EngagementResultDto } from '../dto/engagement-result.dto';
+import type { IFramesService } from '../interfaces/service/IFrameService';
+import type { IFramesRepository } from '../interfaces/repository/IFramesRepository';
+import type { IModelClient } from '../interfaces/service/IModelClient';
+import type { ITemporaryStorageService } from '../interfaces/service/ITemporaryStorageService';
+import { FrameDTO } from '../dtos/FrameDTO';
+import { EngagementResultDto } from '../dtos/EngagementResultDto';
+import { EngagementRecord } from '../entities/EngagementRecord';
 import {
   FRAMES_REPOSITORY,
   MODEL_CLIENT,
@@ -35,7 +36,7 @@ export class FramesService implements IFramesService {
   ) {}
 
   async analyzeFrame(dto: FrameDTO): Promise<EngagementResultDto> {
-    const prediction = await this.modelClient.predict(dto.video, dto.frameCount);
+    const prediction = await this.modelClient.predict(dto.data, dto.sequence);
 
     const result: EngagementResultDto = {
       id: randomUUID(),
@@ -58,21 +59,30 @@ export class FramesService implements IFramesService {
       return [];
     }
 
-    await this.framesRepository.createMany(
-      buffered.map((r) => ({
-        id: r.id,
-        userId: r.userId,
-        sessionId: r.sessionId,
-        engagementScore: r.engagementScore,
-        engagementLabel: r.engagementLabel,
-        startTime: new Date(r.startTime),
-        endTime: new Date(r.endTime),
-      })),
-    );
-
+    await this.storeInDatabase(buffered);
     await this.temporaryStorage.clearRecords(sessionId);
-    this.logger.log(`Flushed ${buffered.length} records for session ${sessionId}`);
 
+    this.logger.log(`Flushed ${buffered.length} records for session ${sessionId}`);
     return buffered;
+  }
+
+  /**
+   * Maps buffered DTOs to entity shape and persists them in one bulk write.
+   * Kept separate from flushSession so the DTO->entity mapping is isolated
+   * and independently testable, and so flushSession stays readable as
+   * pure orchestration (fetch -> persist -> clear).
+   */
+  private async storeInDatabase(records: EngagementResultDto[]): Promise<void> {
+    const entities: Partial<EngagementRecord>[] = records.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      sessionId: r.sessionId,
+      engagementScore: r.engagementScore,
+      engagementLabel: r.engagementLabel,
+      startTime: new Date(r.startTime),
+      endTime: new Date(r.endTime),
+    }));
+
+    await this.framesRepository.createMany(entities);
   }
 }

@@ -1,5 +1,4 @@
-import { EngagementRecord } from '../entities/engagement-record.entity';
-
+import { EngagementRecord } from '../../entities/EngagementRecord';
 /**
  * Contract for persistence. The service layer depends only on this
  * interface, never on the concrete TypeORM repository — so the storage

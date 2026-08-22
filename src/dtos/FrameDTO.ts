@@ -12,6 +12,7 @@ import {
  * The frontend has already done MediaPipe face cropping — this DTO
  * represents one clip, ready for the model.
  */
+
 export class FrameDTO {
   @IsUUID()
   userId!: string;
