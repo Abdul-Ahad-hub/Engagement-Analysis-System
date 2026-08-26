@@ -11,13 +11,13 @@ import {
 } from '@nestjs/common';
 
 import { FRAMES_SERVICE } from '../common/constants/injection-tokens';
-import { FrameDTO } from 'src/dtos/FrameDTO';
+import { FrameDTO } from '../dtos/FrameDTO';
 import { EngagementResultDto } from '../dtos/EngagementResultDto';
 import type { IFramesService } from '../interfaces/service/IFrameService';
 
 /**
  * Thin HTTP layer: parses/validates input (via DTO decorators + the global
- * ValidationPipe), delegates to the service, returns the result. 
+ * ValidationPipe), delegates to the service, returns the result.
  */
 @Controller('frames')
 export class FramesController {
@@ -32,4 +32,11 @@ export class FramesController {
     return this.framesService.analyzeFrame(dto);
   }
 
+  @Post('session/:sessionId/flush')
+  @HttpCode(HttpStatus.OK)
+  async flushSession(
+    @Param('sessionId', new ParseUUIDPipe({ version: '4' })) sessionId: string,
+  ): Promise<EngagementResultDto[]> {
+    return this.framesService.flushSession(sessionId);
+  }
 }
