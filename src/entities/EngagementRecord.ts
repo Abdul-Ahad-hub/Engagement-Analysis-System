@@ -4,26 +4,54 @@ import {
   Entity,
   Index,
   PrimaryColumn,
+  Unique,
 } from 'typeorm';
 
+/** One analyzed capture window (16 frames, ~10 s) of one recording session. */
 @Entity('engagement_records')
+@Unique('uq_engagement_records_session_window', ['sessionId', 'windowIndex'])
 export class EngagementRecord {
   @PrimaryColumn('uuid')
   id!: string;
 
   @Index()
   @Column({ type: 'uuid' })
-  userId!: string;
-
-  @Index()
-  @Column({ type: 'uuid' })
   sessionId!: string;
 
-  @Column({ type: 'float' })
-  engagementScore!: number;
+  @Index()
+  @Column({ type: 'varchar', nullable: true })
+  meetingId!: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', nullable: true })
+  userEmail!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  userName!: string | null;
+
+  @Column({ type: 'int' })
+  windowIndex!: number;
+
+  @Column({ type: 'float', nullable: true })
+  engagementScore!: number | null;
 
   @Column({ type: 'varchar' })
   engagementLabel!: string;
+
+  @Column({ type: 'varchar', default: 'inferred' })
+  status!: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  skipReason!: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  framesFilled!: number;
+
+  @Column({ type: 'int', default: 0 })
+  faceFrames!: number;
+
+  @Column({ type: 'boolean', default: false })
+  partial!: boolean;
 
   @Column({ type: 'timestamptz' })
   startTime!: Date;
