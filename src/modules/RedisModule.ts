@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { Inject, Module, OnApplicationShutdown } from '@nestjs/common';
+import Redis from 'ioredis';
 import { redisClientProvider } from '../external-services/redisClientProvider';
 import { RedisTemporaryStorageService } from '../services/RedisTemporaryStorageService';
-import { TEMPORARY_STORAGE_SERVICE } from '../common/constants/injection-tokens';
+import { REDIS_CLIENT, TEMPORARY_STORAGE_SERVICE } from '../common/constants/injection-tokens';
 
 /**
  * Self-contained buffer-storage module. Exports only the interface token —
@@ -15,4 +16,10 @@ import { TEMPORARY_STORAGE_SERVICE } from '../common/constants/injection-tokens'
   ],
   exports: [TEMPORARY_STORAGE_SERVICE],
 })
-export class RedisModule {}
+export class RedisModule implements OnApplicationShutdown {
+  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+
+  async onApplicationShutdown() {
+    this.redis.disconnect();
+  }
+}

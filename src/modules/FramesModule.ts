@@ -6,6 +6,8 @@ import { FramesService } from '../services/FramesService';
 import { FramesRepository } from '../repositories/FramesRepository';
 import { HttpModelClient } from '../services/HttpModelClient';
 import { EngagementRecord } from '../entities/EngagementRecord';
+import { EngagementSession } from '../entities/EngagementSession';
+import { GoogleAuthGuard } from '../common/guards/GoogleAuthGuard';
 import { RedisModule } from './RedisModule';
 import {
   FRAMES_REPOSITORY,
@@ -15,12 +17,13 @@ import {
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EngagementRecord]),
+    TypeOrmModule.forFeature([EngagementRecord, EngagementSession]),
     HttpModule,
     RedisModule,
   ],
   controllers: [FramesController],
   providers: [
+    GoogleAuthGuard,
     { provide: FRAMES_SERVICE, useClass: FramesService },
     { provide: FRAMES_REPOSITORY, useClass: FramesRepository },
     { provide: MODEL_CLIENT, useClass: HttpModelClient },

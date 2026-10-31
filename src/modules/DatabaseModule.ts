@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EngagementRecord } from '../entities/EngagementRecord';
+import { EngagementSession } from '../entities/EngagementSession';
 
 /**
  * Owns the Neon (Postgres) connection. Kept separate from AppModule so the
@@ -12,13 +13,22 @@ import { EngagementRecord } from '../entities/EngagementRecord';
   imports: [
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        url: config.get<string>('DATABASE_URL'),
-        ssl: { rejectUnauthorized: false }, // required by Neon
-        entities: [EngagementRecord],
-        synchronize: false, // use migrations against a real DB, not auto-sync
-      }),
+      useFactory: (config: ConfigService) => {
+        const url = config.get<string>('DATABASE_URL') ?? '';
+        let servername: string | undefined;
+        try {
+          servername = new URL(url).hostname;
+        } catch {
+          servername = undefined;
+        }
+        return {
+          type: 'postgres',
+          url,
+          ssl: { rejectUnauthorized: false, ...(servername ? { servername } : {}) }, // required by Neon SNI
+          entities: [EngagementRecord, EngagementSession],
+          synchronize: config.get<string>('NODE_ENV') !== 'production',
+        };
+      },
       inject: [ConfigService],
     }),
   ],

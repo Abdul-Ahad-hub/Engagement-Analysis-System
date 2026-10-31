@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EngagementRecord } from '../entities/EngagementRecord';
+import { EngagementSession } from '../entities/EngagementSession';
 import { IFramesRepository } from '../interfaces/repository/IFramesRepository';
 import { PersistenceException } from '../common/exceptions/Exceptions';
 
@@ -10,12 +11,17 @@ export class FramesRepository implements IFramesRepository {
   constructor(
     @InjectRepository(EngagementRecord)
     private readonly ormRepository: Repository<EngagementRecord>,
+    @InjectRepository(EngagementSession)
+    private readonly sessionRepository: Repository<EngagementSession>,
   ) {}
 
-  async createMany(records: Partial<EngagementRecord>[]): Promise<EngagementRecord[]> {
+  async createMany(records: Partial<EngagementRecord>[]): Promise<void> {
+    if (records.length === 0) return;
     try {
-      const entities = this.ormRepository.create(records);
-      return await this.ormRepository.save(entities);
+      await this.ormRepository.upsert(records, {
+        conflictPaths: ['sessionId', 'windowIndex'],
+        skipUpdateIfNoValuesChanged: true,
+      });
     } catch (err) {
       throw new PersistenceException({ operation: 'createMany', cause: (err as Error).message });
     }
@@ -33,10 +39,26 @@ export class FramesRepository implements IFramesRepository {
     try {
       return await this.ormRepository.find({
         where: { sessionId },
-        order: { createdAt: 'ASC' },
+        order: { windowIndex: 'ASC' },
       });
     } catch (err) {
       throw new PersistenceException({ operation: 'findBySessionId', cause: (err as Error).message });
+    }
+  }
+
+  async upsertSession(session: Partial<EngagementSession>): Promise<EngagementSession> {
+    try {
+      return await this.sessionRepository.save(this.sessionRepository.create(session));
+    } catch (err) {
+      throw new PersistenceException({ operation: 'upsertSession', cause: (err as Error).message });
+    }
+  }
+
+  async findSession(sessionId: string): Promise<EngagementSession | null> {
+    try {
+      return await this.sessionRepository.findOne({ where: { sessionId } });
+    } catch (err) {
+      throw new PersistenceException({ operation: 'findSession', cause: (err as Error).message });
     }
   }
 }
