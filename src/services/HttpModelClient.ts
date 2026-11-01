@@ -27,10 +27,14 @@ export class HttpModelClient implements IModelClient {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {
-    this.modelUrl = (this.configService.get<string>('MODEL_ENDPOINT_URL') ?? '').trim();
+    this.modelUrl = (
+      this.configService.get<string>('MODEL_URL') ||
+      this.configService.get<string>('MODEL_ENDPOINT_URL') ||
+      ''
+    ).trim();
     this.timeoutMs = Number(this.configService.get('MODEL_TIMEOUT_MS') ?? 30000);
     if (!this.modelUrl) {
-      this.logger.error('MODEL_ENDPOINT_URL is not configured in .env');
+      this.logger.error('MODEL_URL is not configured in environment variables');
     } else {
       this.logger.log(`Model endpoint configured: ${this.modelUrl} (timeout ${this.timeoutMs}ms)`);
     }
@@ -38,7 +42,7 @@ export class HttpModelClient implements IModelClient {
 
   async predict(input: ModelInput): Promise<ModelPredictionResult> {
     if (!this.modelUrl) {
-      throw new ModelInferenceException({ cause: 'MODEL_ENDPOINT_URL is not set in .env' });
+      throw new ModelInferenceException({ cause: 'MODEL_URL is not set in environment variables' });
     }
 
     const [height, width] = input.frameShape;

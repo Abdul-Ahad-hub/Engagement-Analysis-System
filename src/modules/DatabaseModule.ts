@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import * as pg from 'pg';
 import { EngagementRecord } from '../entities/EngagementRecord';
 import { EngagementSession } from '../entities/EngagementSession';
 
@@ -23,10 +24,14 @@ import { EngagementSession } from '../entities/EngagementSession';
         }
         return {
           type: 'postgres',
+          driver: pg,
           url,
-          ssl: { rejectUnauthorized: false, ...(servername ? { servername } : {}) }, // required by Neon SNI
+          ssl: { rejectUnauthorized: false, ...(servername ? { servername } : {}) },
           entities: [EngagementRecord, EngagementSession],
-          synchronize: config.get<string>('NODE_ENV') !== 'production',
+          synchronize: false,
+          extra: {
+            max: 1,
+          },
         };
       },
       inject: [ConfigService],
