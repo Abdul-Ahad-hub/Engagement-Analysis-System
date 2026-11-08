@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FramesController } from '../endpoints/FramesController';
+import { DashboardController } from '../endpoints/DashboardController';
 import { FramesService } from '../services/FramesService';
 import { FramesRepository } from '../repositories/FramesRepository';
 import { HttpModelClient } from '../services/HttpModelClient';
@@ -21,7 +22,7 @@ import {
     HttpModule,
     RedisModule,
   ],
-  controllers: [FramesController],
+  controllers: [FramesController, DashboardController],
   providers: [
     GoogleAuthGuard,
     { provide: FRAMES_SERVICE, useClass: FramesService },
