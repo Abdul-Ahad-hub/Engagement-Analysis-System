@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, type QueryDeepPartialEntity } from 'typeorm';
 import { EngagementRecord } from '../entities/EngagementRecord';
 import { EngagementSession } from '../entities/EngagementSession';
 import { IFramesRepository } from '../interfaces/repository/IFramesRepository';
@@ -18,7 +18,7 @@ export class FramesRepository implements IFramesRepository {
   async createMany(records: Partial<EngagementRecord>[]): Promise<void> {
     if (records.length === 0) return;
     try {
-      await this.ormRepository.upsert(records, {
+      await this.ormRepository.upsert(records as QueryDeepPartialEntity<EngagementRecord>[], {
         conflictPaths: ['sessionId', 'windowIndex'],
         skipUpdateIfNoValuesChanged: true,
       });
@@ -32,6 +32,14 @@ export class FramesRepository implements IFramesRepository {
       return await this.ormRepository.findOne({ where: { id } });
     } catch (err) {
       throw new PersistenceException({ operation: 'findById', cause: (err as Error).message });
+    }
+  }
+
+  async findBySessionWindow(sessionId: string, windowIndex: number): Promise<EngagementRecord | null> {
+    try {
+      return await this.ormRepository.findOne({ where: { sessionId, windowIndex } });
+    } catch (err) {
+      throw new PersistenceException({ operation: 'findBySessionWindow', cause: (err as Error).message });
     }
   }
 
@@ -51,21 +59,6 @@ export class FramesRepository implements IFramesRepository {
       return await this.sessionRepository.save(this.sessionRepository.create(session));
     } catch (err) {
       throw new PersistenceException({ operation: 'upsertSession', cause: (err as Error).message });
-    }
-  }
-
-  async findSessionsByUserEmail(userEmail: string, limit: number): Promise<EngagementSession[]> {
-    try {
-      return await this.sessionRepository.find({
-        where: { userEmail },
-        order: { savedAt: 'DESC' },
-        take: limit,
-      });
-    } catch (err) {
-      throw new PersistenceException({
-        operation: 'findSessionsByUserEmail',
-        cause: (err as Error).message,
-      });
     }
   }
 

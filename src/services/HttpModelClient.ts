@@ -6,6 +6,7 @@ import {
   IModelClient,
   ModelInput,
   ModelPredictionResult,
+  ModelUpload,
 } from '../interfaces/service/IModelClient';
 import { ModelInferenceException } from '../common/exceptions/Exceptions';
 
@@ -22,6 +23,9 @@ export class HttpModelClient implements IModelClient {
   private readonly logger = new Logger(HttpModelClient.name);
   private readonly modelUrl: string;
   private readonly timeoutMs: number;
+  private readonly landmarksUrl: string;
+  private readonly videoUrl: string;
+  private readonly videoLandmarksUrl: string;
 
   constructor(
     private readonly httpService: HttpService,
@@ -33,8 +37,11 @@ export class HttpModelClient implements IModelClient {
       ''
     ).trim();
     this.timeoutMs = Number(this.configService.get('MODEL_TIMEOUT_MS') ?? 30000);
+    this.landmarksUrl = (this.configService.get<string>('MODEL_LANDMARKS_URL') ?? '').trim();
+    this.videoUrl = (this.configService.get<string>('MODEL_VIDEO_URL') ?? '').trim();
+    this.videoLandmarksUrl = (this.configService.get<string>('MODEL_VIDEO_LANDMARKS_URL') ?? '').trim();
     if (!this.modelUrl) {
-      this.logger.error('MODEL_URL is not configured in environment variables');
+      this.logger.warn('MODEL_URL is not configured; cloud frame inference will return an error until it is set.');
     } else {
       this.logger.log(`Model endpoint configured: ${this.modelUrl} (timeout ${this.timeoutMs}ms)`);
     }
@@ -100,6 +107,63 @@ export class HttpModelClient implements IModelClient {
       const msg = (err as Error).message;
       this.logger.error(`Model inference call failed: ${msg}`);
       throw new ModelInferenceException({ cause: msg });
+    }
+  }
+
+  async predictLandmarks(input: Omit<ModelInput, 'frames' | 'frameShape'>): Promise<ModelPredictionResult> {
+    if (!this.landmarksUrl) throw new ModelInferenceException({ cause: 'MODEL_LANDMARKS_URL is not configured' });
+    try {
+      const res = await fetch(this.landmarksUrl, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        // The AI TCN endpoint accepts only the landmarks property. Keep caller metadata
+        // in NestJS for persistence; do not send unsupported fields to the model.
+        body: JSON.stringify({ landmarks: input.landmarks }), signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      const raw = await res.text();
+      if (!res.ok) throw new ModelInferenceException({ cause: `HTTP ${res.status}: ${raw.slice(0, 300)}` });
+      const data = JSON.parse(raw) as unknown;
+      return this.parse(data);
+    } catch (err) {
+      if (err instanceof ModelInferenceException) throw err;
+      throw new ModelInferenceException({ cause: (err as Error).message });
+    }
+  }
+
+  async predictVideo(video: ModelUpload, meta: Record<string, unknown>): Promise<ModelPredictionResult> {
+    if (!this.videoUrl) throw new ModelInferenceException({ cause: 'MODEL_VIDEO_URL is not configured' });
+    const form = new FormData();
+    form.append('video', new Blob([new Uint8Array(video.buffer)], { type: video.mimetype || 'application/octet-stream' }), video.originalname);
+    form.append('meta', JSON.stringify(meta));
+    return this.postForm(this.videoUrl, form);
+  }
+
+  async predictVideoLandmarks(
+    video: ModelUpload,
+    landmarks: ModelUpload,
+    meta: Record<string, unknown>,
+  ): Promise<ModelPredictionResult> {
+    if (!this.videoLandmarksUrl) throw new ModelInferenceException({ cause: 'MODEL_VIDEO_LANDMARKS_URL is not configured' });
+    const form = new FormData();
+    form.append('video', new Blob([new Uint8Array(video.buffer)], { type: video.mimetype || 'application/octet-stream' }), video.originalname);
+    form.append('landmarks', new Blob([new Uint8Array(landmarks.buffer)], { type: landmarks.mimetype || 'application/octet-stream' }), landmarks.originalname || 'landmarks.npy');
+    form.append('meta', JSON.stringify(meta));
+    return this.postForm(this.videoLandmarksUrl, form);
+  }
+
+  private async postForm(url: string, form: FormData): Promise<ModelPredictionResult> {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        body: form,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      const raw = await res.text();
+      if (!res.ok) throw new ModelInferenceException({ cause: `HTTP ${res.status}: ${raw.slice(0, 300)}` });
+      return this.parse(JSON.parse(raw) as unknown);
+    } catch (err) {
+      if (err instanceof ModelInferenceException) throw err;
+      throw new ModelInferenceException({ cause: (err as Error).message });
     }
   }
 

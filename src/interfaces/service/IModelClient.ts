@@ -35,6 +35,13 @@ export interface ModelInput {
   };
 }
 
+/** In-memory upload received by the NestJS multipart routes. */
+export interface ModelUpload {
+  buffer: Buffer;
+  originalname: string;
+  mimetype: string;
+}
+
 /**
  * Contract for talking to the deep learning model, wherever it's hosted.
  * Isolates HTTP/gRPC/queue details from the service layer so the transport
@@ -42,4 +49,11 @@ export interface ModelInput {
  */
 export interface IModelClient {
   predict(input: ModelInput): Promise<ModelPredictionResult>;
+  predictLandmarks?(input: Omit<ModelInput, 'frames' | 'frameShape'>): Promise<ModelPredictionResult>;
+  predictVideo?(video: ModelUpload, meta: Record<string, unknown>): Promise<ModelPredictionResult>;
+  predictVideoLandmarks?(
+    video: ModelUpload,
+    landmarks: ModelUpload,
+    meta: Record<string, unknown>,
+  ): Promise<ModelPredictionResult>;
 }

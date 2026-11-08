@@ -3,6 +3,9 @@ import { SessionSummaryDto } from '../../dtos/SessionSummaryDto';
 import { EngagementResultDto } from '../../dtos/EngagementResultDto';
 import { EngagementSession } from '../../entities/EngagementSession';
 import { EngagementRecord } from '../../entities/EngagementRecord';
+import { OnlyResultDto } from '../../dtos/OnlyResultDto';
+import { OnlyLandmarksDto } from '../../dtos/OnlyLandmarksDto';
+import { ModelPredictionResult, ModelUpload } from './IModelClient';
 
 export interface WindowAnalysisResponse {
   ok: true;
@@ -19,10 +22,14 @@ export interface SessionReport {
 export interface IFramesService {
   analyzeFrame(dto: FrameDTO): Promise<WindowAnalysisResponse>;
   saveSession(dto: SessionSummaryDto): Promise<EngagementSession>;
+  saveOnlyResult(dto: OnlyResultDto): Promise<unknown>;
+  analyzeOnlyLandmarks(dto: OnlyLandmarksDto): Promise<unknown>;
+  analyzeVideo(video: ModelUpload, meta: Record<string, unknown>): Promise<ModelPredictionResult>;
+  analyzeVideoLandmarks(
+    video: ModelUpload,
+    landmarks: ModelUpload,
+    meta: Record<string, unknown>,
+  ): Promise<ModelPredictionResult>;
   flushSession(sessionId: string): Promise<EngagementResultDto[]>;
   getSessionReport(sessionId: string): Promise<SessionReport>;
-  /** Sessions owned by the given (verified) e-mail, newest first. */
-  listUserSessions(userEmail: string): Promise<EngagementSession[]>;
-  /** Full report of a session, only if it belongs to the given e-mail; otherwise null. */
-  getUserSessionReport(sessionId: string, userEmail: string): Promise<SessionReport | null>;
 }

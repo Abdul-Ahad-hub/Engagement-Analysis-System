@@ -44,6 +44,15 @@ export class EngagementRecord {
   @Column({ type: 'varchar', nullable: true })
   skipReason!: string | null;
 
+  @Column({ type: 'varchar', default: 'cloud' })
+  source!: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  resultId!: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  prediction!: Record<string, unknown> | null;
+
   @Column({ type: 'int', default: 0 })
   framesFilled!: number;
 

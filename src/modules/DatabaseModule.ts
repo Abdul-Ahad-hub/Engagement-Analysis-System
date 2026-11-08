@@ -16,6 +16,11 @@ import { EngagementSession } from '../entities/EngagementSession';
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => {
         const url = config.get<string>('DATABASE_URL') ?? '';
+        if (!url) {
+          // Let the API boot for health checks and configuration diagnosis. DB-backed
+          // operations will still require DATABASE_URL and an initialized connection.
+          console.warn('DATABASE_URL is not configured; starting without a database connection.');
+        }
         let servername: string | undefined;
         try {
           servername = new URL(url).hostname;
@@ -26,6 +31,7 @@ import { EngagementSession } from '../entities/EngagementSession';
           type: 'postgres',
           driver: pg,
           url,
+          manualInitialization: !url,
           ssl: { rejectUnauthorized: false, ...(servername ? { servername } : {}) },
           entities: [EngagementRecord, EngagementSession],
           synchronize: false,

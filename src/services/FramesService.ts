@@ -6,14 +6,16 @@ import type {
   WindowAnalysisResponse,
 } from '../interfaces/service/IFrameService';
 import type { IFramesRepository } from '../interfaces/repository/IFramesRepository';
-import type { IModelClient } from '../interfaces/service/IModelClient';
+import type { IModelClient, ModelPredictionResult, ModelUpload } from '../interfaces/service/IModelClient';
 import type { ITemporaryStorageService } from '../interfaces/service/ITemporaryStorageService';
 import { FrameDTO, FrameItemDto } from '../dtos/FrameDTO';
 import { SessionSummaryDto } from '../dtos/SessionSummaryDto';
 import { EngagementResultDto } from '../dtos/EngagementResultDto';
 import { EngagementRecord } from '../entities/EngagementRecord';
 import { EngagementSession } from '../entities/EngagementSession';
-import { FrameValidationException } from '../common/exceptions/Exceptions';
+import { OnlyResultDto } from '../dtos/OnlyResultDto';
+import { OnlyLandmarksDto } from '../dtos/OnlyLandmarksDto';
+import { FrameValidationException, ModelInferenceException } from '../common/exceptions/Exceptions';
 import {
   FRAMES_REPOSITORY,
   MODEL_CLIENT,
@@ -46,7 +48,6 @@ export class FramesService implements IFramesService {
   private static readonly MIN_FACE_FRAMES_FOR_INFERENCE = 8;
   private static readonly FLUSH_EVERY_N_WINDOWS = 10;
   private static readonly SKIPPED_WINDOW_LABEL = 'no_face';
-  private static readonly MAX_LISTED_SESSIONS = 200;
 
   private readonly logger = new Logger(FramesService.name);
   private readonly flushing = new Map<string, Promise<EngagementResultDto[]>>();
@@ -158,6 +159,8 @@ export class FramesService implements IFramesService {
       maxFrameMs: dto.maxFrameMs,
       windowsSent: dto.windowsSent,
       windowsUnsent: dto.windowsUnsent,
+      mode: dto.mode ?? null,
+      routing: dto.routing ?? null,
       windowsStored: records.length,
       windowsInferred: inferred.length,
       avgEngagementScore: scored.length
@@ -174,6 +177,68 @@ export class FramesService implements IFramesService {
     return session;
   }
 
+  async saveOnlyResult(dto: OnlyResultDto) {
+    const existing = await this.framesRepository.findBySessionWindow(dto.sessionId, dto.windowIndex);
+    if (existing) return { ok: true, duplicate: true, record: existing };
+    const record: Partial<EngagementRecord> = {
+      id: randomUUID(), sessionId: dto.sessionId, meetingId: dto.meetingId ?? null,
+      userEmail: dto.userEmail ?? null, userName: dto.userName ?? null, windowIndex: dto.windowIndex,
+      engagementScore: dto.confidence, engagementLabel: dto.label, status: 'inferred',
+      skipReason: null, framesFilled: dto.framesInWindow, faceFrames: dto.faceFrames,
+      partial: dto.partial, startTime: new Date(dto.startedAt), endTime: new Date(dto.at),
+      source: 'local', resultId: dto.resultId,
+      prediction: { ...dto, userId: dto.userId ?? null },
+    };
+    await this.framesRepository.createMany([record]);
+    return { ok: true, duplicate: false };
+  }
+
+  async analyzeOnlyLandmarks(dto: OnlyLandmarksDto) {
+    const existing = await this.framesRepository.findBySessionWindow(dto.sessionId, dto.windowIndex);
+    if (existing) return { ok: true, duplicate: true, record: existing };
+    const problems: string[] = [];
+    if (dto.landmarkCount !== 52 || dto.landmarkIndices.length !== 52) problems.push('landmarkCount and landmarkIndices must contain 52 landmarks');
+    if (dto.landmarks.length !== 16 || dto.faceDetected.length !== 16) problems.push('landmarks and faceDetected must contain 16 frames');
+    dto.landmarks.forEach((points, i) => {
+      if (points.length !== 52 || points.some((p) => p.length !== 3 || p.some((v) => !Number.isFinite(v)))) problems.push(`landmarks[${i}] must be [52][3] finite numbers`);
+      if (dto.faceDetected[i] === false && points.some((p) => p[0] !== 0 || p[1] !== 0 || p[2] !== 0)) problems.push(`landmarks[${i}] must be zero when face is absent`);
+    });
+    if (Date.parse(dto.endedAt) < Date.parse(dto.startedAt)) problems.push('endedAt is before startedAt');
+    if (problems.length) throw new FrameValidationException({ problems });
+    if (!this.modelClient.predictLandmarks) throw new ModelInferenceException({ cause: 'Landmarks-only model is not configured' });
+    const prediction = await this.modelClient.predictLandmarks({
+      landmarks: dto.landmarks, faceDetected: dto.faceDetected, landmarkIndices: dto.landmarkIndices,
+      meta: { sessionId: dto.sessionId, meetingId: dto.meetingId ?? null, windowIndex: dto.windowIndex,
+        userEmail: dto.userEmail ?? null, partial: dto.partial, framesFilled: dto.framesFilled,
+        frameIntervalMs: dto.frameIntervalMs, startedAt: dto.startedAt, endedAt: dto.endedAt },
+    });
+    const record: Partial<EngagementRecord> = {
+      id: randomUUID(), sessionId: dto.sessionId, meetingId: dto.meetingId ?? null,
+      userEmail: dto.userEmail ?? null, userName: dto.userName ?? null, windowIndex: dto.windowIndex,
+      engagementScore: prediction.engagementScore, engagementLabel: prediction.engagementLabel,
+      status: 'inferred', skipReason: null, framesFilled: dto.framesFilled,
+      faceFrames: dto.faceDetected.filter(Boolean).length, partial: dto.partial,
+      startTime: new Date(dto.startedAt), endTime: new Date(dto.endedAt), source: 'landmarks',
+      resultId: null, prediction: { raw: prediction.raw, reason: dto.reason ?? null },
+    };
+    await this.framesRepository.createMany([record]);
+    return { ok: true, duplicate: false, result: record };
+  }
+
+  async analyzeVideo(video: ModelUpload, meta: Record<string, unknown>): Promise<ModelPredictionResult> {
+    if (!this.modelClient.predictVideo) throw new ModelInferenceException({ cause: 'Video model route is not configured' });
+    return this.modelClient.predictVideo(video, meta);
+  }
+
+  async analyzeVideoLandmarks(
+    video: ModelUpload,
+    landmarks: ModelUpload,
+    meta: Record<string, unknown>,
+  ): Promise<ModelPredictionResult> {
+    if (!this.modelClient.predictVideoLandmarks) throw new ModelInferenceException({ cause: 'Video-landmarks model route is not configured' });
+    return this.modelClient.predictVideoLandmarks(video, landmarks, meta);
+  }
+
   async flushSession(sessionId: string): Promise<EngagementResultDto[]> {
     while (this.flushing.has(sessionId)) {
       await this.flushing.get(sessionId)!.catch(() => undefined);
@@ -182,22 +247,6 @@ export class FramesService implements IFramesService {
     const job = this.doFlush(sessionId).finally(() => this.flushing.delete(sessionId));
     this.flushing.set(sessionId, job);
     return job;
-  }
-
-  async listUserSessions(userEmail: string): Promise<EngagementSession[]> {
-    return this.framesRepository.findSessionsByUserEmail(
-      userEmail,
-      FramesService.MAX_LISTED_SESSIONS,
-    );
-  }
-
-  async getUserSessionReport(
-    sessionId: string,
-    userEmail: string,
-  ): Promise<SessionReport | null> {
-    const report = await this.getSessionReport(sessionId);
-    const owner = report.session?.userEmail?.toLowerCase();
-    return owner && owner === userEmail.toLowerCase() ? report : null;
   }
 
   async getSessionReport(sessionId: string): Promise<SessionReport> {

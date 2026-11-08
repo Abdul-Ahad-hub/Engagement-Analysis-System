@@ -61,6 +61,12 @@ export class EngagementSession {
   @Column({ type: 'int', default: 0 })
   windowsUnsent!: number;
 
+  @Column({ type: 'varchar', nullable: true })
+  mode!: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  routing!: Record<string, unknown> | null;
+
   /** Windows stored in engagement_records for this session. */
   @Column({ type: 'int', default: 0 })
   windowsStored!: number;

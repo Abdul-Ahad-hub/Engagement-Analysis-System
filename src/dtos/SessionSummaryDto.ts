@@ -75,4 +75,11 @@ export class SessionSummaryDto {
   @IsInt()
   @Min(0)
   windowsUnsent!: number;
+
+  @IsOptional()
+  routing!: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsString()
+  mode!: string | null;
 }

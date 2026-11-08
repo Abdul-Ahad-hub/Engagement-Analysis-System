@@ -29,7 +29,7 @@ export class ModelInferenceException extends AppException {
   constructor(details?: Record<string, unknown>) {
     super(
       'MODEL_INFERENCE_FAILED',
-      'The engagement model failed to process the frame.',
+      'The engagement model failed to process the input.',
       HttpStatus.BAD_GATEWAY,
       details,
     );

@@ -10,10 +10,9 @@ export interface IFramesRepository {
   /** Insert-or-update by (sessionId, windowIndex), so re-flushing is safe. */
   createMany(records: Partial<EngagementRecord>[]): Promise<void>;
   findById(id: string): Promise<EngagementRecord | null>;
+  findBySessionWindow(sessionId: string, windowIndex: number): Promise<EngagementRecord | null>;
   findBySessionId(sessionId: string): Promise<EngagementRecord[]>;
 
   upsertSession(session: Partial<EngagementSession>): Promise<EngagementSession>;
   findSession(sessionId: string): Promise<EngagementSession | null>;
-  /** Newest-first sessions saved by one user (matched on verified e-mail). */
-  findSessionsByUserEmail(userEmail: string, limit: number): Promise<EngagementSession[]>;
 }
