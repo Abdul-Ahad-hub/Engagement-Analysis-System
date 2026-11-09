@@ -32,6 +32,8 @@ export interface ModelInput {
     meetingId: string | null;
     windowIndex: number;
     userEmail: string | null;
+    userName?: string | null;
+    userId?: string | null;
     partial: boolean;
     framesFilled: number;
     frameIntervalMs: number;

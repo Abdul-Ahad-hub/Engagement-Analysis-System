@@ -35,4 +35,8 @@ export interface IFramesService {
   ): Promise<ModelPredictionResult>;
   flushSession(sessionId: string): Promise<EngagementResultDto[]>;
   getSessionReport(sessionId: string): Promise<SessionReport>;
+  /** Sessions owned by the given (verified) e-mail, newest first. */
+  listUserSessions(userEmail: string): Promise<EngagementSession[]>;
+  /** Full report of a session, only if it belongs to the given e-mail; otherwise null. */
+  getUserSessionReport(sessionId: string, userEmail: string): Promise<SessionReport | null>;
 }

@@ -48,6 +48,7 @@ export class FramesService implements IFramesService {
   private static readonly MIN_FACE_FRAMES_FOR_INFERENCE = 8;
   private static readonly FLUSH_EVERY_N_WINDOWS = 10;
   private static readonly SKIPPED_WINDOW_LABEL = 'no_face';
+  private static readonly MAX_LISTED_SESSIONS = 200;
 
   private readonly logger = new Logger(FramesService.name);
   private readonly flushing = new Map<string, Promise<EngagementResultDto[]>>();
@@ -130,8 +131,9 @@ export class FramesService implements IFramesService {
           result: this.toResultDto({ ...pending, status: 'pending' } as EngagementRecord),
         };
       }
-      engagementScore = prediction.engagementScore;
-      engagementLabel = prediction.engagementLabel;
+      const syncPrediction = prediction as ModelPredictionResult;
+      engagementScore = syncPrediction.engagementScore;
+      engagementLabel = syncPrediction.engagementLabel;
     }
 
     const result: EngagementResultDto = {
@@ -152,7 +154,7 @@ export class FramesService implements IFramesService {
       endTime: dto.endedAt,
     };
 
-    if (asyncMode && !v.skipReason) await this.framesRepository.createMany([result]);
+    if (asyncMode && !v.skipReason) await this.storeInDatabase([result]);
     else await this.temporaryStorage.saveRecord(result);
     this.logger.log(
       `session ${dto.sessionId} window ${dto.windowIndex}: ${result.status}` +
@@ -326,6 +328,22 @@ export class FramesService implements IFramesService {
     const job = this.doFlush(sessionId).finally(() => this.flushing.delete(sessionId));
     this.flushing.set(sessionId, job);
     return job;
+  }
+
+  async listUserSessions(userEmail: string): Promise<EngagementSession[]> {
+    return this.framesRepository.findSessionsByUserEmail(
+      userEmail,
+      FramesService.MAX_LISTED_SESSIONS,
+    );
+  }
+
+  async getUserSessionReport(
+    sessionId: string,
+    userEmail: string,
+  ): Promise<SessionReport | null> {
+    const report = await this.getSessionReport(sessionId);
+    const owner = report.session?.userEmail?.toLowerCase();
+    return owner && owner === userEmail.toLowerCase() ? report : null;
   }
 
   async getSessionReport(sessionId: string): Promise<SessionReport> {

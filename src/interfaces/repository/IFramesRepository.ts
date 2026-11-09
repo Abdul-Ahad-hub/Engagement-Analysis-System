@@ -15,4 +15,6 @@ export interface IFramesRepository {
 
   upsertSession(session: Partial<EngagementSession>): Promise<EngagementSession>;
   findSession(sessionId: string): Promise<EngagementSession | null>;
+  /** Newest-first sessions saved by one user (matched on verified e-mail). */
+  findSessionsByUserEmail(userEmail: string, limit: number): Promise<EngagementSession[]>;
 }
