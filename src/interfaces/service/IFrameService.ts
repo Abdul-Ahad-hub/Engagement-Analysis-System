@@ -11,6 +11,8 @@ export interface WindowAnalysisResponse {
   ok: true;
   /** true when this (sessionId, windowIndex) was already processed (retry). */
   duplicate: boolean;
+  /** AI service job ID, present while the window is queued for callback inference. */
+  aiJobId?: string;
   result: EngagementResultDto;
 }
 
@@ -21,6 +23,7 @@ export interface SessionReport {
 
 export interface IFramesService {
   analyzeFrame(dto: FrameDTO): Promise<WindowAnalysisResponse>;
+  handleAiResult(entry: Record<string, unknown>): Promise<void>;
   saveSession(dto: SessionSummaryDto): Promise<EngagementSession>;
   saveOnlyResult(dto: OnlyResultDto): Promise<unknown>;
   analyzeOnlyLandmarks(dto: OnlyLandmarksDto): Promise<unknown>;

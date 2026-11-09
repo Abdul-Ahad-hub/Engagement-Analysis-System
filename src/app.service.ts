@@ -14,8 +14,9 @@ export class AppService {
       ok: true,
       status: 'ok',
       service: 'engagement-backend',
-      mode: 'sync',
+      mode: String(this.config.get<string>('MODEL_ASYNC') ?? 'false').toLowerCase() === 'true' ? 'async-callback' : 'sync',
       databaseConfigured: Boolean(this.config.get<string>('DATABASE_URL')),
+      aiCallbacksConfigured: Boolean(this.config.get<string>('AI_CALLBACK_TOKEN')),
       configuredModelRoutes: {
         frames: Boolean(this.config.get<string>('MODEL_URL') || this.config.get<string>('MODEL_ENDPOINT_URL')),
         video: Boolean(this.config.get<string>('MODEL_VIDEO_URL')),

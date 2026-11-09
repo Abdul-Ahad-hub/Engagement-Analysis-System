@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   IModelClient,
   ModelInput,
+  ModelAcceptedResult,
   ModelPredictionResult,
   ModelUpload,
 } from '../interfaces/service/IModelClient';
@@ -26,6 +27,7 @@ export class HttpModelClient implements IModelClient {
   private readonly landmarksUrl: string;
   private readonly videoUrl: string;
   private readonly videoLandmarksUrl: string;
+  private readonly asyncEnabled: boolean;
 
   constructor(
     private readonly httpService: HttpService,
@@ -37,6 +39,7 @@ export class HttpModelClient implements IModelClient {
       ''
     ).trim();
     this.timeoutMs = Number(this.configService.get('MODEL_TIMEOUT_MS') ?? 30000);
+    this.asyncEnabled = String(this.configService.get('MODEL_ASYNC') ?? 'false').toLowerCase() === 'true';
     this.landmarksUrl = (this.configService.get<string>('MODEL_LANDMARKS_URL') ?? '').trim();
     this.videoUrl = (this.configService.get<string>('MODEL_VIDEO_URL') ?? '').trim();
     this.videoLandmarksUrl = (this.configService.get<string>('MODEL_VIDEO_LANDMARKS_URL') ?? '').trim();
@@ -47,7 +50,9 @@ export class HttpModelClient implements IModelClient {
     }
   }
 
-  async predict(input: ModelInput): Promise<ModelPredictionResult> {
+  isAsyncEnabled(): boolean { return this.asyncEnabled; }
+
+  async predict(input: ModelInput): Promise<ModelPredictionResult | ModelAcceptedResult> {
     if (!this.modelUrl) {
       throw new ModelInferenceException({ cause: 'MODEL_URL is not set in environment variables' });
     }
@@ -96,6 +101,16 @@ export class HttpModelClient implements IModelClient {
       }
 
       const data = JSON.parse(rawText) as unknown;
+      if (res.status === 202) {
+        const accepted = data as Record<string, unknown>;
+        if (accepted.status !== 'accepted' || typeof accepted.job_id !== 'string') {
+          throw new ModelInferenceException({ cause: 'AI returned an invalid 202 acceptance payload' });
+        }
+        if (!this.asyncEnabled) {
+          throw new ModelInferenceException({ cause: 'AI returned 202 but MODEL_ASYNC is disabled' });
+        }
+        return { accepted: true, jobId: accepted.job_id };
+      }
       const parsed = this.parse(data);
       this.logger.log(
         `Model predicted in ${Date.now() - started}ms -> label=${parsed.engagementLabel}, ` +

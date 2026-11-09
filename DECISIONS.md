@@ -2,7 +2,7 @@
 
 This document records the end-to-end design across the Chrome extension, NestJS backend, and Smart Meet AI service. Update the decision log as choices are made; retain superseded entries with dates.
 
-**Status:** Architecture reviewed across all three components. Product direction is now clarified: cloud-only is the current product behavior; local inference is retained temporarily for the research paper and is planned for removal after publication. The extension's checked-in config currently says `MODE: "auto"`, so implementation/config alignment remains outstanding. No runtime code has been changed in this documentation update.
+**Status:** Architecture reviewed across all three components. Product direction is now clarified: cloud-only is the current product behavior; local inference is retained temporarily for the research paper and is planned for removal after publication. The extension's checked-in config currently says `MODE: "auto"`, so implementation/config alignment remains outstanding. NestJS now supports opt-in async callback inference for `/engagement/frames`; synchronous remains the default.
 
 ## System context: who captures and sends data?
 
@@ -23,13 +23,13 @@ NestJS is the system's ingestion, authentication, idempotency, buffering, and du
 
 ### NestJS backend
 
-- `/engagement/frames`: validates the extension JSON window, checks the Redis window-result cache for duplicates, calls `MODEL_URL`, and buffers the resulting record in Redis (in-memory fallback if Redis is unreachable). Flushes are triggered at 10 buffered records or by session save/explicit flush.
+- `/engagement/frames`: validates the extension JSON window, checks for duplicates, and calls `MODEL_URL`. Synchronous mode buffers results as before; opt-in async mode durably stores a pending record before submission and updates it through authenticated AI callbacks.
 - `/engagement/onlyresult`: persists an extension-side prediction directly to Postgres, deduplicated on `(sessionId, windowIndex)`; `resultId` is also unique when present.
 - `/engagement/onlylandmarks`: calls `MODEL_LANDMARKS_URL` synchronously and persists its result directly to Postgres.
 - `/engagement/sessions`: flushes buffered records, computes summary statistics from persisted records, and saves the session summary.
 - `/engagement/sessions/:id/flush` and `GET /engagement/sessions/:id`: manual flush and report retrieval.
 
-The main-model output is presently expected inline by `HttpModelClient`. The backend has no callback receiver or durable model-job table. Redis is a temporary buffer, not a durable job queue; its automatic memory fallback is process-local and is not durable across restarts.
+Synchronous mode expects the main-model output inline. Async frame mode accepts the AI job response, stores durable `pending`/`inferred`/`failed` record states in Postgres, and authenticates callback routes using a shared bearer token. Redis remains a temporary buffer for synchronous window records, not a durable job queue.
 
 ### Smart Meet AI service (implementation guide)
 
@@ -87,7 +87,7 @@ Upload a video to `/predict/video` or `/predict/video-landmarks` and let AI samp
 
 **Callback mode** can free the request path: AI returns `202` with `job_id`, then posts accepted/completed events. But this requires NestJS to persist a job keyed to extension `(sessionId, windowIndex)`, return/track a pending state, accept authenticated and retried callbacks idempotently, reconcile errors/timeouts, and expose completion to the session report/UI. The present Redis result buffer and direct `onlyresult` insert do not constitute that lifecycle. AI callback `job_id` is not a substitute for the extension's stable window identity.
 
-**Assessment:** Begin synchronous unless observed inference latency or throughput shows it is unsuitable. If callback mode is selected, build a durable database-backed job state machine before enabling AI `RESULT_URL`.
+**Assessment:** Synchronous remains the default. Async callback mode is implemented as an opt-in for frame windows; enable it only after configuring the AI callback URLs and shared token.
 
 ## Recommended target architecture (proposal, not selected)
 
@@ -112,6 +112,7 @@ The recommendation deliberately separates **routing policy** (extension chooses 
 | 2026-11-08 | Result precedence/storage | Open for transitional research modes | Cloud-only operation has one intended source. The `auto` mode can still create local plus later cloud outputs for one window; define handling if/when that mode is used during research. |
 | 2026-11-08 | TCN fallback | Pending endpoint/model confirmation | Existing browser TCN and `/onlylandmarks` fallback exist; verify model/version and class semantics. |
 | 2026-11-08 | Delivery mode | Recommended synchronous initially; not selected | Compatible with current `HttpModelClient`. Async needs durable job lifecycle and callback receiver. |
+| 2026-11-09 | Async frame callbacks | Implemented, opt-in (`MODEL_ASYNC=true`) | Pending records are persisted before AI submission; authenticated idempotent callbacks update the same `(sessionId, windowIndex)` record. Sync remains the default. |
 | 2026-11-08 | Video endpoints | Not selected | Incompatible with current extension's no-video rolling-window collection without a product/data-lifecycle change. |
 
 ## Decisions required before implementation

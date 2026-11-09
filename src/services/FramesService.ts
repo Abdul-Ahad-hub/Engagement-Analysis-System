@@ -6,7 +6,7 @@ import type {
   WindowAnalysisResponse,
 } from '../interfaces/service/IFrameService';
 import type { IFramesRepository } from '../interfaces/repository/IFramesRepository';
-import type { IModelClient, ModelPredictionResult, ModelUpload } from '../interfaces/service/IModelClient';
+import type { IModelClient, ModelAcceptedResult, ModelPredictionResult, ModelUpload } from '../interfaces/service/IModelClient';
 import type { ITemporaryStorageService } from '../interfaces/service/ITemporaryStorageService';
 import { FrameDTO, FrameItemDto } from '../dtos/FrameDTO';
 import { SessionSummaryDto } from '../dtos/SessionSummaryDto';
@@ -62,6 +62,11 @@ export class FramesService implements IFramesService {
   ) {}
 
   async analyzeFrame(dto: FrameDTO): Promise<WindowAnalysisResponse> {
+    const asyncMode = this.modelClient.isAsyncEnabled?.() === true;
+    if (asyncMode) {
+      const saved = await this.framesRepository.findBySessionWindow(dto.sessionId, dto.windowIndex);
+      if (saved) return { ok: true, duplicate: true, result: this.toResultDto(saved) };
+    }
     const existing = await this.temporaryStorage.getWindowResult(dto.sessionId, dto.windowIndex);
     if (existing) {
       this.logger.log(`window ${dto.windowIndex} of session ${dto.sessionId} already processed (retry)`);
@@ -73,24 +78,58 @@ export class FramesService implements IFramesService {
     let engagementScore: number | null = null;
     let engagementLabel = FramesService.SKIPPED_WINDOW_LABEL;
     if (!v.skipReason) {
-      const prediction = await this.modelClient.predict({
-        frames: v.frames.map((f) => f.data),
-        landmarks: dto.landmarks,
-        faceDetected: dto.faceDetected,
-        frameShape: [FramesService.FRAME_SIZE, FramesService.FRAME_SIZE, 3],
-        landmarkIndices: dto.landmarkIndices,
-        meta: {
-          sessionId: dto.sessionId,
-          meetingId: dto.meetingId ?? null,
-          windowIndex: dto.windowIndex,
-          userEmail: dto.userEmail ?? null,
-          partial: dto.partial,
-          framesFilled: dto.framesFilled,
-          frameIntervalMs: dto.frameIntervalMs,
-          startedAt: dto.startedAt,
-          endedAt: dto.endedAt,
-        },
-      });
+      const pending: Partial<EngagementRecord> = {
+        id: randomUUID(), sessionId: dto.sessionId, meetingId: dto.meetingId ?? null,
+        userEmail: dto.userEmail ?? null, userName: dto.userName ?? null, windowIndex: dto.windowIndex,
+        engagementScore: null, engagementLabel: 'pending', status: 'pending', skipReason: null,
+        framesFilled: dto.framesFilled, faceFrames: v.faceFrames, partial: dto.partial,
+        startTime: new Date(dto.startedAt), endTime: new Date(dto.endedAt), source: 'cloud',
+        resultId: null, prediction: null,
+      };
+      // The durable placeholder must exist before the AI can callback, since a fast
+      // batch may finish before its HTTP 202 response reaches this process.
+      if (asyncMode) await this.framesRepository.createMany([pending]);
+      let prediction: ModelPredictionResult | ModelAcceptedResult;
+      try {
+        prediction = await this.modelClient.predict({
+          frames: v.frames.map((f) => f.data),
+          landmarks: dto.landmarks,
+          faceDetected: dto.faceDetected,
+          frameShape: [FramesService.FRAME_SIZE, FramesService.FRAME_SIZE, 3],
+          landmarkIndices: dto.landmarkIndices,
+          meta: {
+            sessionId: dto.sessionId,
+            meetingId: dto.meetingId ?? null,
+            windowIndex: dto.windowIndex,
+            userEmail: dto.userEmail ?? null,
+            userName: dto.userName ?? null,
+            userId: dto.userId ?? null,
+            partial: dto.partial,
+            framesFilled: dto.framesFilled,
+            frameIntervalMs: dto.frameIntervalMs,
+            startedAt: dto.startedAt,
+            endedAt: dto.endedAt,
+          },
+        });
+      } catch (err) {
+        if (asyncMode) {
+          await this.framesRepository.createMany([{
+            ...pending,
+            status: 'failed',
+            engagementLabel: 'inference_error',
+            skipReason: (err as Error).message,
+          }]);
+        }
+        throw err;
+      }
+      if ('accepted' in prediction && prediction.accepted) {
+        return {
+          ok: true,
+          duplicate: false,
+          aiJobId: prediction.jobId,
+          result: this.toResultDto({ ...pending, status: 'pending' } as EngagementRecord),
+        };
+      }
       engagementScore = prediction.engagementScore;
       engagementLabel = prediction.engagementLabel;
     }
@@ -113,7 +152,8 @@ export class FramesService implements IFramesService {
       endTime: dto.endedAt,
     };
 
-    await this.temporaryStorage.saveRecord(result);
+    if (asyncMode && !v.skipReason) await this.framesRepository.createMany([result]);
+    else await this.temporaryStorage.saveRecord(result);
     this.logger.log(
       `session ${dto.sessionId} window ${dto.windowIndex}: ${result.status}` +
         (v.skipReason ? ` (${v.skipReason})` : ` -> ${engagementLabel} (${engagementScore})`) +
@@ -128,6 +168,45 @@ export class FramesService implements IFramesService {
     }
 
     return { ok: true, duplicate: false, result };
+  }
+
+  async handleAiResult(entry: Record<string, unknown>): Promise<void> {
+    const sessionId = String(entry.sessionId ?? '');
+    const windowIndex = Number(entry.windowIndex);
+    if (!sessionId || !Number.isInteger(windowIndex) || windowIndex < 0) {
+      throw new FrameValidationException({ cause: 'AI callback requires sessionId and windowIndex' });
+    }
+    const existing = await this.framesRepository.findBySessionWindow(sessionId, windowIndex);
+    const failed = typeof entry.error === 'string';
+    const score = Number(entry.confidence);
+    const label = entry.engagement_Level;
+    const record: Partial<EngagementRecord> = {
+      id: existing?.id ?? randomUUID(), sessionId, windowIndex,
+      meetingId: String(entry.meetingId ?? existing?.meetingId ?? '') || null,
+      userEmail: String(entry.userEmail ?? existing?.userEmail ?? '') || null,
+      userName: String(entry.userName ?? existing?.userName ?? '') || null,
+      engagementScore: failed || !Number.isFinite(score) ? null : score,
+      engagementLabel: failed ? 'inference_error' : String(label ?? 'unknown'),
+      status: failed ? 'failed' : 'inferred', skipReason: failed ? String(entry.error) : null,
+      framesFilled: Number(entry.framesFilled ?? existing?.framesFilled ?? 0),
+      faceFrames: existing?.faceFrames ?? 0,
+      partial: Boolean(entry.partial ?? existing?.partial ?? false),
+      startTime: new Date(String(entry.startedAt ?? existing?.startTime ?? new Date().toISOString())),
+      endTime: new Date(String(entry.endedAt ?? existing?.endTime ?? new Date().toISOString())),
+      source: 'cloud', resultId: null, prediction: { raw: entry, aiJobId: entry.job_id ?? null },
+    };
+    await this.framesRepository.createMany([record]);
+  }
+
+  private toResultDto(record: EngagementRecord): EngagementResultDto {
+    return {
+      id: record.id, sessionId: record.sessionId, meetingId: record.meetingId,
+      userEmail: record.userEmail, userName: record.userName, windowIndex: record.windowIndex,
+      engagementScore: record.engagementScore, engagementLabel: record.engagementLabel,
+      status: record.status as EngagementResultDto['status'], skipReason: record.skipReason,
+      framesFilled: record.framesFilled, faceFrames: record.faceFrames, partial: record.partial,
+      startTime: record.startTime.toISOString(), endTime: record.endTime.toISOString(),
+    };
   }
 
   async saveSession(dto: SessionSummaryDto): Promise<EngagementSession> {

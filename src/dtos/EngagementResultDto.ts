@@ -13,8 +13,8 @@ export class EngagementResultDto {
   /** null when the model was not called (see `status`). */
   engagementScore!: number | null;
   engagementLabel!: string;
-  /** "inferred" = model ran; "skipped" = business rule prevented inference. */
-  status!: 'inferred' | 'skipped';
+  /** Pending async inference, completed inference, skipped window, or inference failure. */
+  status!: 'inferred' | 'skipped' | 'pending' | 'failed';
   /** Why inference was skipped (e.g. "too_few_faces"), else null. */
   skipReason!: string | null;
   framesFilled!: number;

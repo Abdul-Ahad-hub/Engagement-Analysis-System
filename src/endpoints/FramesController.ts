@@ -9,12 +9,14 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
   Req,
   UploadedFiles,
   UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 
 import { FRAMES_SERVICE } from '../common/constants/injection-tokens';
 import { FrameDTO } from '../dtos/FrameDTO';
@@ -40,9 +42,15 @@ export class FramesController {
 
   @Post('frames')
   @HttpCode(HttpStatus.CREATED)
-  async analyze(@Body() dto: FrameDTO, @Req() req: { user?: AuthenticatedUser }) {
+  async analyze(
+    @Body() dto: FrameDTO,
+    @Req() req: { user?: AuthenticatedUser },
+    @Res({ passthrough: true }) response: Response,
+  ) {
     this.applyVerifiedUser(dto, req.user);
-    return this.framesService.analyzeFrame(dto);
+    const result = await this.framesService.analyzeFrame(dto);
+    if (result.result.status === 'pending') response.status(HttpStatus.ACCEPTED);
+    return result;
   }
 
   @Post('sessions')

@@ -7,6 +7,11 @@ export interface ModelPredictionResult {
   raw?: unknown;
 }
 
+export interface ModelAcceptedResult {
+  accepted: true;
+  jobId: string;
+}
+
 /**
  * What the backend sends to the model for one window. Frames stay separate
  * (one base64 string per frame, each `frameShape` uint8 RGB, row-major) and
@@ -48,7 +53,8 @@ export interface ModelUpload {
  * can change, and so this is trivially mockable in service-layer tests.
  */
 export interface IModelClient {
-  predict(input: ModelInput): Promise<ModelPredictionResult>;
+  isAsyncEnabled?(): boolean;
+  predict(input: ModelInput): Promise<ModelPredictionResult | ModelAcceptedResult>;
   predictLandmarks?(input: Omit<ModelInput, 'frames' | 'frameShape'>): Promise<ModelPredictionResult>;
   predictVideo?(video: ModelUpload, meta: Record<string, unknown>): Promise<ModelPredictionResult>;
   predictVideoLandmarks?(

@@ -1,6 +1,6 @@
 # Synchronous Backend ↔ AI Service Integration Guide
 
-This guide defines the synchronous mapping between inference input types on the NestJS backend and their matching AI service routes. The route mapping is based on input shape: video, video plus landmarks, separate frames, or landmarks only. No model-selection decision is made here. Browser-side local inference remains preserved separately for the research-paper requirement.
+This guide defines the mapping between inference input types on the NestJS backend and their matching AI service routes. Main frame inference supports synchronous responses or authenticated async callbacks; other routes retain their synchronous mapping. Browser-side local inference remains preserved separately for the research-paper requirement.
 
 ## System boundary
 
@@ -8,7 +8,7 @@ This guide defines the synchronous mapping between inference input types on the 
 Chrome Extension
   └─ JSON + Google bearer token → NestJS backend (/engagement/*)
        ├─ validates, identifies, deduplicates, buffers, persists
-       └─ synchronous internal HTTP request → Smart Meet AI service (/predict/*)
+       └─ internal HTTP request → Smart Meet AI service (/predict/*)
 ```
 
 The extension should call NestJS, not the AI service directly. NestJS owns extension authentication, validation, session/window identity, persistence, and result reporting. The AI service receives only inference inputs and returns predictions.
@@ -17,7 +17,7 @@ The extension should call NestJS, not the AI service directly. NestJS owns exten
 
 | NestJS backend endpoint | Purpose | AI service endpoint | Current relation |
 |---|---|---|---|
-| `POST /engagement/frames` | Main inference for supplied individual frames (current extension window contract) | `POST /predict/frames` | Existing synchronous mapping via `HttpModelClient.predict()` and `MODEL_URL` |
+| `POST /engagement/frames` | Main inference for supplied individual frames (current extension window contract) | `POST /predict/frames` | Synchronous by default; async callback supported with `MODEL_ASYNC=true` |
 | `POST /engagement/video` | Inference from an uploaded video without caller landmarks | `POST /predict/video` | Implemented synchronous proxy |
 | `POST /engagement/video-landmarks` | Inference from an uploaded video plus landmarks aligned to its sampled frames | `POST /predict/video-landmarks` | Implemented synchronous proxy |
 | `POST /engagement/onlylandmarks` | Inference from landmarks only | `POST /predict/tcn-landmarks` | Synchronous mapping; adapter sends only accepted `landmarks` property |
@@ -44,15 +44,15 @@ The NestJS route accepts multipart form-data containing required `video`, requir
 
 Both video proxy routes return the normalized `ModelPredictionResult` directly and currently do not create engagement records or session summaries. Their request metadata is passed through to the AI service. Callers needing durable results should use the existing window/session persistence contract or add a deliberate video-result persistence contract.
 
-### Separate frames: `/engagement/frames` → `/predict/frames` (existing)
+### Separate frames: `/engagement/frames` → `/predict/frames`
 
-This is the current extension flow. It receives JSON with separate frame objects and landmarks, then converts the frame objects to repeated PNG multipart fields and the landmarks to `.npy` before synchronously calling `/predict/frames`.
+This is the current extension flow. It receives JSON with separate frame objects and landmarks, then converts the frame objects to repeated PNG multipart fields and the landmarks to `.npy` before calling `/predict/frames`.
 
 ### Landmarks only: `/engagement/onlylandmarks` → `/predict/tcn-landmarks` (existing)
 
 This route receives the extension's landmarks window, validates its metadata and shape, then synchronously sends only `{ "landmarks": [...] }` as JSON to the TCN AI route. The backend retains request metadata for saving the result. The adapter sends only that accepted property.
 
-All four mappings are synchronous: NestJS waits for AI's prediction response and returns the result to its caller. Configure the corresponding `MODEL_*_URL` values and keep AI `RESULT_URL` unset for this flow. Callback mode is outside this simple mapping.
+By default these mappings are synchronous: NestJS waits for AI's prediction response and returns the result. The main frame path can instead use the async callback flow below by setting `MODEL_ASYNC=true` and configuring the AI callbacks. The landmarks-only TCN endpoint remains synchronous.
 
 ## Main cloud path: `/engagement/frames` → `/predict/frames`
 
@@ -139,15 +139,15 @@ The extension probes the NestJS base URL plus `/health`. NestJS health returns `
 3. AI responds directly to the NestJS HTTP request.
 4. NestJS parses and buffers the result, then returns a result to the extension.
 
-Expected behavior from the AI guide: invalid model input gives 422; a full main-model queue gives 503; synchronous model timeout gives 504; unexpected inference failure gives 500. The backend maps non-2xx AI responses to `ModelInferenceException`. The extension may retry failed uploads, so backend and model operations should remain idempotent by `(sessionId, windowIndex)` and avoid creating a second logical window on retries.
+Expected behavior from the AI guide: invalid model input gives 422; a full main-model queue gives 503; synchronous model timeout gives 504; unexpected inference failure gives 500. In async mode NestJS returns 202 once AI accepts the job, then records the callback result or failure. The extension may retry failed uploads, so backend and model operations should remain idempotent by `(sessionId, windowIndex)` and avoid creating a second logical window on retries.
 
-Set the backend timeout longer than the AI's worst expected inference time, but below the caller/hosting request limit. Current backend default is 30 seconds. If this limit is insufficient, asynchronous AI callbacks require a separate durable job lifecycle; setting AI `RESULT_URL` alone is not supported by the current backend client, because it expects the prediction in the original response.
+In synchronous mode, set the backend timeout longer than the AI's worst expected inference time but below the caller/hosting request limit. Current backend default is 30 seconds. In async mode, HTTP timeout covers validation/preprocessing and queue acceptance; model execution completes through the callback lifecycle.
 
-## Async callback mode: not currently wired
+## Async callback mode for frame windows
 
-When AI `RESULT_URL` is set, main routes return `202 {job_id,status:"accepted"}` and later call `RESULT_URL`; optional `RECEIVED_URL` receives acceptance. Current `HttpModelClient` expects a prediction immediately and would try to parse the acceptance object as a prediction, failing. No backend callback controller currently receives `RECEIVED_URL` or `RESULT_URL`, persists AI job IDs, or maps them back to an extension window.
+When AI `RESULT_URL` is set, the main AI routes return `202 {job_id,status:"accepted"}` and later call `RESULT_URL`; optional `RECEIVED_URL` reports acceptance. For the extension's frame-window flow, NestJS now stores a durable `pending` engagement record before sending the request, returns HTTP 202 with the AI `jobId`, and accepts callbacks at `POST /engagement/ai-callbacks/received` and `POST /engagement/ai-callbacks/results`. The result callback updates the durable record using `(sessionId, windowIndex)` from the echoed metadata; duplicate callback deliveries upsert the same record. Inference errors are persisted with status `failed`.
 
-Therefore leave `RESULT_URL` unset for the current synchronous integration. To adopt async later, implement a durable mapping from AI `job_id` to `(sessionId, windowIndex)`, accepted/completed/error states, authenticated callback endpoints, idempotent retries/upserts, and a way for the extension/session report to observe pending completion. AI `job_id` does not replace the extension's window identity.
+Set `MODEL_ASYNC=true` in NestJS and configure the AI service's `RESULT_URL=https://<backend-host>/engagement/ai-callbacks/results` and `RECEIVED_URL=https://<backend-host>/engagement/ai-callbacks/received`. Set AI `RESULT_TOKEN`/`RECEIVED_TOKEN` and backend `AI_CALLBACK_TOKEN` to the same strong secret. Keep `MODEL_ASYNC=false` for synchronous operation. The session report exposes `pending`, `inferred`, and `failed` record states; AI `job_id` is returned to the caller but the stable window identity remains `(sessionId, windowIndex)`. This callback implementation covers the extension's `/engagement/frames` route; the video proxy and TCN route remain synchronous-only from the backend's perspective.
 
 ## AI route mapping notes
 
@@ -157,7 +157,7 @@ Therefore leave `RESULT_URL` unset for the current synchronous integration. To a
 
 ## Contract checks before enabling cloud inference
 
-- Point `MODEL_URL` at the AI `/predict/frames` URL and keep `RESULT_URL` unset for synchronous calls.
+- Point `MODEL_URL` at the AI `/predict/frames` URL. Keep `MODEL_ASYNC=false` and AI `RESULT_URL` unset for synchronous calls, or configure the callback URLs and `MODEL_ASYNC=true` together.
 - Confirm the AI multipart route accepts PNG files in repeated `frames` parts and a NumPy `.npy` landmarks part shaped `(16,52,3)`.
 - Confirm AI uses supplied landmarks and does not require a different landmark order/normalization than the extension's 52-point order.
 - Confirm `engagement_Level` is a class index or label and interpret `confidence` consistently. Preserve full raw output if later analysis needs probabilities/logits.
