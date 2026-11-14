@@ -8,25 +8,23 @@ export interface ModelPredictionResult {
 }
 
 /**
- * What the backend sends to the model for one window. Frames stay separate
- * (one base64 string per frame, each `frameShape` uint8 RGB, row-major) and
- * landmarks are their own field, exactly as captured by the extension.
+ * Domain-agnostic input sent to the deep learning model for one capture window.
+ * Frames stay separate (one base64 string per frame, each `frameShape` uint8 RGB,
+ * row-major) and landmarks are their own field.
  */
 export interface ModelInput {
   /** N base64 strings, each decoding to frameShape[0]*frameShape[1]*frameShape[2] bytes. */
   frames: string[];
   /** [N][52][3] normalised to the full camera frame; zeros where no face. */
   landmarks: number[][][];
-  /** [N] - false means the frame is a center crop and its landmarks are zeros. */
+  /** [N] — false means the frame is a center crop and its landmarks are zeros. */
   faceDetected: boolean[];
   /** [height, width, channels], e.g. [160, 160, 3]. */
   frameShape: [number, number, number];
   landmarkIndices: number[];
   meta: {
     sessionId: string;
-    meetingId: string | null;
     windowIndex: number;
-    userEmail: string | null;
     partial: boolean;
     framesFilled: number;
     frameIntervalMs: number;

@@ -54,21 +54,6 @@ export class FramesRepository implements IFramesRepository {
     }
   }
 
-  async findSessionsByUserEmail(userEmail: string, limit: number): Promise<EngagementSession[]> {
-    try {
-      return await this.sessionRepository.find({
-        where: { userEmail },
-        order: { savedAt: 'DESC' },
-        take: limit,
-      });
-    } catch (err) {
-      throw new PersistenceException({
-        operation: 'findSessionsByUserEmail',
-        cause: (err as Error).message,
-      });
-    }
-  }
-
   async findSession(sessionId: string): Promise<EngagementSession | null> {
     try {
       return await this.sessionRepository.findOne({ where: { sessionId } });

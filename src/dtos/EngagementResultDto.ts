@@ -1,22 +1,18 @@
 /**
- * Shape returned to the frontend after a window has been analyzed
- * and buffered. Kept separate from the entity so the API contract
- * doesn't leak internal storage columns.
+ * Domain-agnostic shape returned after a capture window has been analyzed
+ * and buffered.
  */
 export class EngagementResultDto {
   id!: string;
   sessionId!: string;
-  meetingId!: string | null;
-  userEmail!: string | null;
-  userName!: string | null;
   windowIndex!: number;
   /** null when the model was not called (see `status`). */
   engagementScore!: number | null;
   engagementLabel!: string;
-  /** "inferred" = model ran; "skipped" = business rule prevented inference. */
+  /** Whether the model ran or the window was skipped by a business rule. */
   status!: 'inferred' | 'skipped';
   /** Why inference was skipped (e.g. "too_few_faces"), else null. */
-  skipReason!: string | null;
+  skipReason!: 'too_few_frames' | 'too_few_faces' | null;
   framesFilled!: number;
   faceFrames!: number;
   partial!: boolean;

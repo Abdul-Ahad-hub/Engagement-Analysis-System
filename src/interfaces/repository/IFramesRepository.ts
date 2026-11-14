@@ -3,7 +3,7 @@ import { EngagementSession } from '../../entities/EngagementSession';
 
 /**
  * Contract for persistence. The service layer depends only on this
- * interface, never on the concrete TypeORM repository - so the storage
+ * interface, never on the concrete TypeORM repository — so the storage
  * engine can change (or be mocked in tests) without touching business logic.
  */
 export interface IFramesRepository {
@@ -14,6 +14,4 @@ export interface IFramesRepository {
 
   upsertSession(session: Partial<EngagementSession>): Promise<EngagementSession>;
   findSession(sessionId: string): Promise<EngagementSession | null>;
-  /** Newest-first sessions saved by one user (matched on verified e-mail). */
-  findSessionsByUserEmail(userEmail: string, limit: number): Promise<EngagementSession[]>;
 }

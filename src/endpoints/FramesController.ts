@@ -8,8 +8,6 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
-  Req,
-  UseGuards,
 } from '@nestjs/common';
 
 import { FRAMES_SERVICE } from '../common/constants/injection-tokens';
@@ -17,14 +15,13 @@ import { FrameDTO } from '../dtos/FrameDTO';
 import { SessionSummaryDto } from '../dtos/SessionSummaryDto';
 import { EngagementResultDto } from '../dtos/EngagementResultDto';
 import type { IFramesService } from '../interfaces/service/IFrameService';
-import { AuthenticatedUser, GoogleAuthGuard } from '../common/guards/GoogleAuthGuard';
 
 /**
- * Thin HTTP layer: parses/validates input (via DTO decorators + the global
- * ValidationPipe), delegates to the service, returns the result.
+ * Domain-agnostic HTTP controller for the Engagement Analysis Engine.
+ * Accepts capture windows and session summaries for any capture source,
+ * delegates to the service layer, and returns the engagement analysis results.
  */
 @Controller('engagement')
-@UseGuards(GoogleAuthGuard)
 export class FramesController {
   constructor(
     @Inject(FRAMES_SERVICE)
@@ -33,15 +30,13 @@ export class FramesController {
 
   @Post('frames')
   @HttpCode(HttpStatus.CREATED)
-  async analyze(@Body() dto: FrameDTO, @Req() req: { user?: AuthenticatedUser }) {
-    this.applyVerifiedUser(dto, req.user);
+  async analyze(@Body() dto: FrameDTO) {
     return this.framesService.analyzeFrame(dto);
   }
 
   @Post('sessions')
   @HttpCode(HttpStatus.CREATED)
-  async saveSession(@Body() dto: SessionSummaryDto, @Req() req: { user?: AuthenticatedUser }) {
-    this.applyVerifiedUser(dto, req.user);
+  async saveSession(@Body() dto: SessionSummaryDto) {
     const session = await this.framesService.saveSession(dto);
     return { ok: true, session };
   }
@@ -57,14 +52,5 @@ export class FramesController {
     @Param('sessionId', new ParseUUIDPipe({ version: '4' })) sessionId: string,
   ): Promise<EngagementResultDto[]> {
     return this.framesService.flushSession(sessionId);
-  }
-
-  private applyVerifiedUser(
-    dto: { userEmail: string | null; userId: string | null },
-    user?: AuthenticatedUser,
-  ) {
-    if (!user) return;
-    if (user.email) dto.userEmail = user.email;
-    if (user.sub) dto.userId = user.sub;
   }
 }

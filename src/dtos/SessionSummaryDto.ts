@@ -1,6 +1,5 @@
 import {
   IsDateString,
-  IsEmail,
   IsInt,
   IsNumber,
   IsOptional,
@@ -10,33 +9,13 @@ import {
 } from 'class-validator';
 
 /**
- * Sent once by the extension when the user clicks Save (or the call ends):
- * POST /engagement/sessions. Triggers the flush of buffered window results
- * into Postgres and stores the session summary.
+ * Domain-agnostic session summary payload (POST /engagement/sessions).
+ * Triggers the flush of buffered window results into Postgres and computes
+ * aggregate engagement metrics for the capture session.
  */
 export class SessionSummaryDto {
   @IsUUID()
   sessionId!: string;
-
-  @IsOptional()
-  @IsString()
-  userName!: string | null;
-
-  @IsOptional()
-  @IsEmail()
-  userEmail!: string | null;
-
-  @IsOptional()
-  @IsString()
-  userId!: string | null;
-
-  @IsOptional()
-  @IsString()
-  meetingId!: string | null;
-
-  @IsOptional()
-  @IsString()
-  role!: string | null;
 
   @IsDateString()
   savedAt!: string;
@@ -45,7 +24,6 @@ export class SessionSummaryDto {
   @IsDateString()
   startedAt!: string | null;
 
-  /** "user" (Save clicked) | "call-ended" | "tab-closed". */
   @IsOptional()
   @IsString()
   endReason!: string | null;

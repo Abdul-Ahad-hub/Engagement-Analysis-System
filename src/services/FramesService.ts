@@ -27,9 +27,10 @@ interface ValidatedWindow {
 }
 
 /**
- * Business logic layer. Knows nothing about HTTP, Redis, or the ORM —
- * only talks to the model client, temporary storage, and repository
- * through their interfaces, so it can be unit tested with simple mocks.
+ * Domain-agnostic engagement analysis engine.
+ * Knows nothing about HTTP, Redis, the ORM, or any specific application
+ * domain (meetings, users, auth) — only talks to the model client,
+ * temporary storage, and repository through their interfaces.
  *
  * Write path per window:
  *   validate -> idempotency check -> model inference (unless business rules
@@ -46,7 +47,6 @@ export class FramesService implements IFramesService {
   private static readonly MIN_FACE_FRAMES_FOR_INFERENCE = 8;
   private static readonly FLUSH_EVERY_N_WINDOWS = 10;
   private static readonly SKIPPED_WINDOW_LABEL = 'no_face';
-  private static readonly MAX_LISTED_SESSIONS = 200;
 
   private readonly logger = new Logger(FramesService.name);
   private readonly flushing = new Map<string, Promise<EngagementResultDto[]>>();
@@ -80,9 +80,7 @@ export class FramesService implements IFramesService {
         landmarkIndices: dto.landmarkIndices,
         meta: {
           sessionId: dto.sessionId,
-          meetingId: dto.meetingId ?? null,
           windowIndex: dto.windowIndex,
-          userEmail: dto.userEmail ?? null,
           partial: dto.partial,
           framesFilled: dto.framesFilled,
           frameIntervalMs: dto.frameIntervalMs,
@@ -97,9 +95,6 @@ export class FramesService implements IFramesService {
     const result: EngagementResultDto = {
       id: randomUUID(),
       sessionId: dto.sessionId,
-      meetingId: dto.meetingId ?? null,
-      userEmail: dto.userEmail ?? null,
-      userName: dto.userName ?? null,
       windowIndex: dto.windowIndex,
       engagementScore,
       engagementLabel,
@@ -143,11 +138,6 @@ export class FramesService implements IFramesService {
 
     const session = await this.framesRepository.upsertSession({
       sessionId: dto.sessionId,
-      meetingId: dto.meetingId ?? null,
-      userEmail: dto.userEmail ?? null,
-      userName: dto.userName ?? null,
-      userId: dto.userId ?? null,
-      role: dto.role ?? null,
       endReason: dto.endReason ?? null,
       startedAt: dto.startedAt ? new Date(dto.startedAt) : (records[0]?.startTime ?? null),
       savedAt: new Date(dto.savedAt),
@@ -184,22 +174,6 @@ export class FramesService implements IFramesService {
     return job;
   }
 
-  async listUserSessions(userEmail: string): Promise<EngagementSession[]> {
-    return this.framesRepository.findSessionsByUserEmail(
-      userEmail,
-      FramesService.MAX_LISTED_SESSIONS,
-    );
-  }
-
-  async getUserSessionReport(
-    sessionId: string,
-    userEmail: string,
-  ): Promise<SessionReport | null> {
-    const report = await this.getSessionReport(sessionId);
-    const owner = report.session?.userEmail?.toLowerCase();
-    return owner && owner === userEmail.toLowerCase() ? report : null;
-  }
-
   async getSessionReport(sessionId: string): Promise<SessionReport> {
     const [session, records] = await Promise.all([
       this.framesRepository.findSession(sessionId),
@@ -232,9 +206,6 @@ export class FramesService implements IFramesService {
     const entities: Partial<EngagementRecord>[] = records.map((r) => ({
       id: r.id,
       sessionId: r.sessionId,
-      meetingId: r.meetingId,
-      userEmail: r.userEmail,
-      userName: r.userName,
       windowIndex: r.windowIndex,
       engagementScore: r.engagementScore,
       engagementLabel: r.engagementLabel,

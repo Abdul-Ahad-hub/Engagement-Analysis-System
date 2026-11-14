@@ -2,34 +2,16 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  Index,
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
-/** Summary of one recording (from first window until Save / call end). */
+/** Domain-agnostic summary of one capture session. */
 @Entity('engagement_sessions')
 export class EngagementSession {
-  /** Same UUID the extension stamps on every window of the recording. */
+  /** UUID stamped on every window of the capture session. */
   @PrimaryColumn('uuid')
   sessionId!: string;
-
-  @Index()
-  @Column({ type: 'varchar', nullable: true })
-  meetingId!: string | null;
-
-  @Index()
-  @Column({ type: 'varchar', nullable: true })
-  userEmail!: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  userName!: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  userId!: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  role!: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   endReason!: string | null;
