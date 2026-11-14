@@ -6,7 +6,12 @@ import type {
   WindowAnalysisResponse,
 } from '../interfaces/service/IFrameService';
 import type { IFramesRepository } from '../interfaces/repository/IFramesRepository';
-import type { IModelClient, ModelAcceptedResult, ModelPredictionResult, ModelUpload } from '../interfaces/service/IModelClient';
+import type {
+  IModelClient,
+  ModelAcceptedResult,
+  ModelPredictionResult,
+  ModelUpload,
+} from '../interfaces/service/IModelClient';
 import type { ITemporaryStorageService } from '../interfaces/service/ITemporaryStorageService';
 import { FrameDTO, FrameItemDto } from '../dtos/FrameDTO';
 import { SessionSummaryDto } from '../dtos/SessionSummaryDto';
@@ -29,15 +34,10 @@ interface ValidatedWindow {
 }
 
 /**
- * Business logic layer. Knows nothing about HTTP, Redis, or the ORM —
- * only talks to the model client, temporary storage, and repository
- * through their interfaces, so it can be unit tested with simple mocks.
- *
- * Write path per window:
- *   validate -> idempotency check -> model inference (unless business rules
- *   skip it) -> buffer in temporary storage.
- * Nothing hits the permanent DB until flushSession() runs (count-window
- * trigger or explicit session-end signal).
+ * Domain-agnostic engagement analysis engine.
+ * Knows nothing about HTTP, Redis, the ORM, or any specific application
+ * domain (meetings, users, auth) — only talks to the model client,
+ * temporary storage, and repository through their interfaces.
  */
 @Injectable()
 export class FramesService implements IFramesService {
@@ -48,7 +48,6 @@ export class FramesService implements IFramesService {
   private static readonly MIN_FACE_FRAMES_FOR_INFERENCE = 8;
   private static readonly FLUSH_EVERY_N_WINDOWS = 10;
   private static readonly SKIPPED_WINDOW_LABEL = 'no_face';
-  private static readonly MAX_LISTED_SESSIONS = 200;
 
   private readonly logger = new Logger(FramesService.name);
   private readonly flushing = new Map<string, Promise<EngagementResultDto[]>>();
@@ -80,15 +79,22 @@ export class FramesService implements IFramesService {
     let engagementLabel = FramesService.SKIPPED_WINDOW_LABEL;
     if (!v.skipReason) {
       const pending: Partial<EngagementRecord> = {
-        id: randomUUID(), sessionId: dto.sessionId, meetingId: dto.meetingId ?? null,
-        userEmail: dto.userEmail ?? null, userName: dto.userName ?? null, windowIndex: dto.windowIndex,
-        engagementScore: null, engagementLabel: 'pending', status: 'pending', skipReason: null,
-        framesFilled: dto.framesFilled, faceFrames: v.faceFrames, partial: dto.partial,
-        startTime: new Date(dto.startedAt), endTime: new Date(dto.endedAt), source: 'cloud',
-        resultId: null, prediction: null,
+        id: randomUUID(),
+        sessionId: dto.sessionId,
+        windowIndex: dto.windowIndex,
+        engagementScore: null,
+        engagementLabel: 'pending',
+        status: 'pending',
+        skipReason: null,
+        framesFilled: dto.framesFilled,
+        faceFrames: v.faceFrames,
+        partial: dto.partial,
+        startTime: new Date(dto.startedAt),
+        endTime: new Date(dto.endedAt),
+        source: 'cloud',
+        resultId: null,
+        prediction: null,
       };
-      // The durable placeholder must exist before the AI can callback, since a fast
-      // batch may finish before its HTTP 202 response reaches this process.
       if (asyncMode) await this.framesRepository.createMany([pending]);
       let prediction: ModelPredictionResult | ModelAcceptedResult;
       try {
@@ -100,11 +106,7 @@ export class FramesService implements IFramesService {
           landmarkIndices: dto.landmarkIndices,
           meta: {
             sessionId: dto.sessionId,
-            meetingId: dto.meetingId ?? null,
             windowIndex: dto.windowIndex,
-            userEmail: dto.userEmail ?? null,
-            userName: dto.userName ?? null,
-            userId: dto.userId ?? null,
             partial: dto.partial,
             framesFilled: dto.framesFilled,
             frameIntervalMs: dto.frameIntervalMs,
@@ -114,12 +116,14 @@ export class FramesService implements IFramesService {
         });
       } catch (err) {
         if (asyncMode) {
-          await this.framesRepository.createMany([{
-            ...pending,
-            status: 'failed',
-            engagementLabel: 'inference_error',
-            skipReason: (err as Error).message,
-          }]);
+          await this.framesRepository.createMany([
+            {
+              ...pending,
+              status: 'failed',
+              engagementLabel: 'inference_error',
+              skipReason: (err as Error).message,
+            },
+          ]);
         }
         throw err;
       }
@@ -139,9 +143,6 @@ export class FramesService implements IFramesService {
     const result: EngagementResultDto = {
       id: randomUUID(),
       sessionId: dto.sessionId,
-      meetingId: dto.meetingId ?? null,
-      userEmail: dto.userEmail ?? null,
-      userName: dto.userName ?? null,
       windowIndex: dto.windowIndex,
       engagementScore,
       engagementLabel,
@@ -183,31 +184,39 @@ export class FramesService implements IFramesService {
     const score = Number(entry.confidence);
     const label = entry.engagement_Level;
     const record: Partial<EngagementRecord> = {
-      id: existing?.id ?? randomUUID(), sessionId, windowIndex,
-      meetingId: String(entry.meetingId ?? existing?.meetingId ?? '') || null,
-      userEmail: String(entry.userEmail ?? existing?.userEmail ?? '') || null,
-      userName: String(entry.userName ?? existing?.userName ?? '') || null,
+      id: existing?.id ?? randomUUID(),
+      sessionId,
+      windowIndex,
       engagementScore: failed || !Number.isFinite(score) ? null : score,
       engagementLabel: failed ? 'inference_error' : String(label ?? 'unknown'),
-      status: failed ? 'failed' : 'inferred', skipReason: failed ? String(entry.error) : null,
+      status: failed ? 'failed' : 'inferred',
+      skipReason: failed ? String(entry.error) : null,
       framesFilled: Number(entry.framesFilled ?? existing?.framesFilled ?? 0),
       faceFrames: existing?.faceFrames ?? 0,
       partial: Boolean(entry.partial ?? existing?.partial ?? false),
       startTime: new Date(String(entry.startedAt ?? existing?.startTime ?? new Date().toISOString())),
       endTime: new Date(String(entry.endedAt ?? existing?.endTime ?? new Date().toISOString())),
-      source: 'cloud', resultId: null, prediction: { raw: entry, aiJobId: entry.job_id ?? null },
+      source: 'cloud',
+      resultId: null,
+      prediction: { raw: entry, aiJobId: entry.job_id ?? null },
     };
     await this.framesRepository.createMany([record]);
   }
 
   private toResultDto(record: EngagementRecord): EngagementResultDto {
     return {
-      id: record.id, sessionId: record.sessionId, meetingId: record.meetingId,
-      userEmail: record.userEmail, userName: record.userName, windowIndex: record.windowIndex,
-      engagementScore: record.engagementScore, engagementLabel: record.engagementLabel,
-      status: record.status as EngagementResultDto['status'], skipReason: record.skipReason,
-      framesFilled: record.framesFilled, faceFrames: record.faceFrames, partial: record.partial,
-      startTime: record.startTime.toISOString(), endTime: record.endTime.toISOString(),
+      id: record.id,
+      sessionId: record.sessionId,
+      windowIndex: record.windowIndex,
+      engagementScore: record.engagementScore,
+      engagementLabel: record.engagementLabel,
+      status: record.status as EngagementResultDto['status'],
+      skipReason: record.skipReason,
+      framesFilled: record.framesFilled,
+      faceFrames: record.faceFrames,
+      partial: record.partial,
+      startTime: record.startTime.toISOString(),
+      endTime: record.endTime.toISOString(),
     };
   }
 
@@ -225,11 +234,6 @@ export class FramesService implements IFramesService {
 
     const session = await this.framesRepository.upsertSession({
       sessionId: dto.sessionId,
-      meetingId: dto.meetingId ?? null,
-      userEmail: dto.userEmail ?? null,
-      userName: dto.userName ?? null,
-      userId: dto.userId ?? null,
-      role: dto.role ?? null,
       endReason: dto.endReason ?? null,
       startedAt: dto.startedAt ? new Date(dto.startedAt) : (records[0]?.startTime ?? null),
       savedAt: new Date(dto.savedAt),
@@ -262,13 +266,21 @@ export class FramesService implements IFramesService {
     const existing = await this.framesRepository.findBySessionWindow(dto.sessionId, dto.windowIndex);
     if (existing) return { ok: true, duplicate: true, record: existing };
     const record: Partial<EngagementRecord> = {
-      id: randomUUID(), sessionId: dto.sessionId, meetingId: dto.meetingId ?? null,
-      userEmail: dto.userEmail ?? null, userName: dto.userName ?? null, windowIndex: dto.windowIndex,
-      engagementScore: dto.confidence, engagementLabel: dto.label, status: 'inferred',
-      skipReason: null, framesFilled: dto.framesInWindow, faceFrames: dto.faceFrames,
-      partial: dto.partial, startTime: new Date(dto.startedAt), endTime: new Date(dto.at),
-      source: 'local', resultId: dto.resultId,
-      prediction: { ...dto, userId: dto.userId ?? null },
+      id: randomUUID(),
+      sessionId: dto.sessionId,
+      windowIndex: dto.windowIndex,
+      engagementScore: dto.confidence,
+      engagementLabel: dto.label,
+      status: 'inferred',
+      skipReason: null,
+      framesFilled: dto.framesInWindow,
+      faceFrames: dto.faceFrames,
+      partial: dto.partial,
+      startTime: new Date(dto.startedAt),
+      endTime: new Date(dto.at),
+      source: 'local',
+      resultId: dto.resultId,
+      prediction: { ...dto },
     };
     await this.framesRepository.createMany([record]);
     return { ok: true, duplicate: false };
@@ -278,36 +290,72 @@ export class FramesService implements IFramesService {
     const existing = await this.framesRepository.findBySessionWindow(dto.sessionId, dto.windowIndex);
     if (existing) return { ok: true, duplicate: true, record: existing };
     const problems: string[] = [];
-    if (dto.landmarkCount !== 52 || dto.landmarkIndices.length !== 52) problems.push('landmarkCount and landmarkIndices must contain 52 landmarks');
-    if (dto.landmarks.length !== 16 || dto.faceDetected.length !== 16) problems.push('landmarks and faceDetected must contain 16 frames');
+    if (dto.landmarkCount !== 52 || dto.landmarkIndices.length !== 52) {
+      problems.push('landmarkCount and landmarkIndices must contain 52 landmarks');
+    }
+    if (dto.landmarks.length !== 16 || dto.faceDetected.length !== 16) {
+      problems.push('landmarks and faceDetected must contain 16 frames');
+    }
     dto.landmarks.forEach((points, i) => {
-      if (points.length !== 52 || points.some((p) => p.length !== 3 || p.some((v) => !Number.isFinite(v)))) problems.push(`landmarks[${i}] must be [52][3] finite numbers`);
-      if (dto.faceDetected[i] === false && points.some((p) => p[0] !== 0 || p[1] !== 0 || p[2] !== 0)) problems.push(`landmarks[${i}] must be zero when face is absent`);
+      if (
+        points.length !== 52 ||
+        points.some((p) => p.length !== 3 || p.some((v) => !Number.isFinite(v)))
+      ) {
+        problems.push(`landmarks[${i}] must be [52][3] finite numbers`);
+      }
+      if (
+        dto.faceDetected[i] === false &&
+        points.some((p) => p[0] !== 0 || p[1] !== 0 || p[2] !== 0)
+      ) {
+        problems.push(`landmarks[${i}] must be zero when face is absent`);
+      }
     });
-    if (Date.parse(dto.endedAt) < Date.parse(dto.startedAt)) problems.push('endedAt is before startedAt');
+    if (Date.parse(dto.endedAt) < Date.parse(dto.startedAt)) {
+      problems.push('endedAt is before startedAt');
+    }
     if (problems.length) throw new FrameValidationException({ problems });
-    if (!this.modelClient.predictLandmarks) throw new ModelInferenceException({ cause: 'Landmarks-only model is not configured' });
+    if (!this.modelClient.predictLandmarks) {
+      throw new ModelInferenceException({ cause: 'Landmarks-only model is not configured' });
+    }
     const prediction = await this.modelClient.predictLandmarks({
-      landmarks: dto.landmarks, faceDetected: dto.faceDetected, landmarkIndices: dto.landmarkIndices,
-      meta: { sessionId: dto.sessionId, meetingId: dto.meetingId ?? null, windowIndex: dto.windowIndex,
-        userEmail: dto.userEmail ?? null, partial: dto.partial, framesFilled: dto.framesFilled,
-        frameIntervalMs: dto.frameIntervalMs, startedAt: dto.startedAt, endedAt: dto.endedAt },
+      landmarks: dto.landmarks,
+      faceDetected: dto.faceDetected,
+      landmarkIndices: dto.landmarkIndices,
+      meta: {
+        sessionId: dto.sessionId,
+        windowIndex: dto.windowIndex,
+        partial: dto.partial,
+        framesFilled: dto.framesFilled,
+        frameIntervalMs: dto.frameIntervalMs,
+        startedAt: dto.startedAt,
+        endedAt: dto.endedAt,
+      },
     });
     const record: Partial<EngagementRecord> = {
-      id: randomUUID(), sessionId: dto.sessionId, meetingId: dto.meetingId ?? null,
-      userEmail: dto.userEmail ?? null, userName: dto.userName ?? null, windowIndex: dto.windowIndex,
-      engagementScore: prediction.engagementScore, engagementLabel: prediction.engagementLabel,
-      status: 'inferred', skipReason: null, framesFilled: dto.framesFilled,
-      faceFrames: dto.faceDetected.filter(Boolean).length, partial: dto.partial,
-      startTime: new Date(dto.startedAt), endTime: new Date(dto.endedAt), source: 'landmarks',
-      resultId: null, prediction: { raw: prediction.raw, reason: dto.reason ?? null },
+      id: randomUUID(),
+      sessionId: dto.sessionId,
+      windowIndex: dto.windowIndex,
+      engagementScore: prediction.engagementScore,
+      engagementLabel: prediction.engagementLabel,
+      status: 'inferred',
+      skipReason: null,
+      framesFilled: dto.framesFilled,
+      faceFrames: dto.faceDetected.filter(Boolean).length,
+      partial: dto.partial,
+      startTime: new Date(dto.startedAt),
+      endTime: new Date(dto.endedAt),
+      source: 'landmarks',
+      resultId: null,
+      prediction: { raw: prediction.raw, reason: dto.reason ?? null },
     };
     await this.framesRepository.createMany([record]);
     return { ok: true, duplicate: false, result: record };
   }
 
   async analyzeVideo(video: ModelUpload, meta: Record<string, unknown>): Promise<ModelPredictionResult> {
-    if (!this.modelClient.predictVideo) throw new ModelInferenceException({ cause: 'Video model route is not configured' });
+    if (!this.modelClient.predictVideo) {
+      throw new ModelInferenceException({ cause: 'Video model route is not configured' });
+    }
     return this.modelClient.predictVideo(video, meta);
   }
 
@@ -316,7 +364,9 @@ export class FramesService implements IFramesService {
     landmarks: ModelUpload,
     meta: Record<string, unknown>,
   ): Promise<ModelPredictionResult> {
-    if (!this.modelClient.predictVideoLandmarks) throw new ModelInferenceException({ cause: 'Video-landmarks model route is not configured' });
+    if (!this.modelClient.predictVideoLandmarks) {
+      throw new ModelInferenceException({ cause: 'Video-landmarks model route is not configured' });
+    }
     return this.modelClient.predictVideoLandmarks(video, landmarks, meta);
   }
 
@@ -328,22 +378,6 @@ export class FramesService implements IFramesService {
     const job = this.doFlush(sessionId).finally(() => this.flushing.delete(sessionId));
     this.flushing.set(sessionId, job);
     return job;
-  }
-
-  async listUserSessions(userEmail: string): Promise<EngagementSession[]> {
-    return this.framesRepository.findSessionsByUserEmail(
-      userEmail,
-      FramesService.MAX_LISTED_SESSIONS,
-    );
-  }
-
-  async getUserSessionReport(
-    sessionId: string,
-    userEmail: string,
-  ): Promise<SessionReport | null> {
-    const report = await this.getSessionReport(sessionId);
-    const owner = report.session?.userEmail?.toLowerCase();
-    return owner && owner === userEmail.toLowerCase() ? report : null;
   }
 
   async getSessionReport(sessionId: string): Promise<SessionReport> {
@@ -370,17 +404,11 @@ export class FramesService implements IFramesService {
 
   /**
    * Maps buffered DTOs to entity shape and persists them in one bulk write.
-   * Kept separate from flushSession so the DTO->entity mapping is isolated
-   * and independently testable, and so flushSession stays readable as
-   * pure orchestration (fetch -> persist -> clear).
    */
   private async storeInDatabase(records: EngagementResultDto[]): Promise<void> {
     const entities: Partial<EngagementRecord>[] = records.map((r) => ({
       id: r.id,
       sessionId: r.sessionId,
-      meetingId: r.meetingId,
-      userEmail: r.userEmail,
-      userName: r.userName,
       windowIndex: r.windowIndex,
       engagementScore: r.engagementScore,
       engagementLabel: r.engagementLabel,

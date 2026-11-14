@@ -13,9 +13,9 @@ export interface ModelAcceptedResult {
 }
 
 /**
- * What the backend sends to the model for one window. Frames stay separate
- * (one base64 string per frame, each `frameShape` uint8 RGB, row-major) and
- * landmarks are their own field, exactly as captured by the extension.
+ * Domain-agnostic input sent to the deep learning model for one capture window.
+ * Frames stay separate (one base64 string per frame, each `frameShape` uint8 RGB,
+ * row-major) and landmarks are their own field.
  */
 export interface ModelInput {
   /** N base64 strings, each decoding to frameShape[0]*frameShape[1]*frameShape[2] bytes. */
@@ -29,11 +29,7 @@ export interface ModelInput {
   landmarkIndices: number[];
   meta: {
     sessionId: string;
-    meetingId: string | null;
     windowIndex: number;
-    userEmail: string | null;
-    userName?: string | null;
-    userId?: string | null;
     partial: boolean;
     framesFilled: number;
     frameIntervalMs: number;

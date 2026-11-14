@@ -1,6 +1,6 @@
 import {
-  Body,
   BadRequestException,
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -10,10 +10,8 @@ import {
   ParseUUIDPipe,
   Post,
   Res,
-  Req,
   UploadedFiles,
   UseInterceptors,
-  UseGuards,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -26,14 +24,13 @@ import { OnlyResultDto } from '../dtos/OnlyResultDto';
 import { OnlyLandmarksDto } from '../dtos/OnlyLandmarksDto';
 import type { IFramesService } from '../interfaces/service/IFrameService';
 import type { ModelUpload } from '../interfaces/service/IModelClient';
-import { AuthenticatedUser, GoogleAuthGuard } from '../common/guards/GoogleAuthGuard';
 
 /**
- * Thin HTTP layer: parses/validates input (via DTO decorators + the global
- * ValidationPipe), delegates to the service, returns the result.
+ * Domain-agnostic HTTP controller for the Engagement Analysis Engine.
+ * Accepts capture windows, landmarks, and session summaries from any
+ * capture source without coupling to any meeting platform or user system.
  */
 @Controller('engagement')
-@UseGuards(GoogleAuthGuard)
 export class FramesController {
   constructor(
     @Inject(FRAMES_SERVICE)
@@ -44,10 +41,8 @@ export class FramesController {
   @HttpCode(HttpStatus.CREATED)
   async analyze(
     @Body() dto: FrameDTO,
-    @Req() req: { user?: AuthenticatedUser },
     @Res({ passthrough: true }) response: Response,
   ) {
-    this.applyVerifiedUser(dto, req.user);
     const result = await this.framesService.analyzeFrame(dto);
     if (result.result.status === 'pending') response.status(HttpStatus.ACCEPTED);
     return result;
@@ -55,30 +50,31 @@ export class FramesController {
 
   @Post('sessions')
   @HttpCode(HttpStatus.CREATED)
-  async saveSession(@Body() dto: SessionSummaryDto, @Req() req: { user?: AuthenticatedUser }) {
-    this.applyVerifiedUser(dto, req.user);
+  async saveSession(@Body() dto: SessionSummaryDto) {
     const session = await this.framesService.saveSession(dto);
     return { ok: true, session };
   }
 
   @Post('onlyresult')
   @HttpCode(HttpStatus.OK)
-  async saveOnlyResult(@Body() dto: OnlyResultDto, @Req() req: { user?: AuthenticatedUser }) {
-    this.applyVerifiedUser(dto, req.user);
+  async saveOnlyResult(@Body() dto: OnlyResultDto) {
     return this.framesService.saveOnlyResult(dto);
   }
 
   @Post('onlylandmarks')
   @HttpCode(HttpStatus.OK)
-  async analyzeOnlyLandmarks(@Body() dto: OnlyLandmarksDto, @Req() req: { user?: AuthenticatedUser }) {
-    this.applyVerifiedUser(dto, req.user);
+  async analyzeOnlyLandmarks(@Body() dto: OnlyLandmarksDto) {
     return this.framesService.analyzeOnlyLandmarks(dto);
   }
 
   /** Proxy video-only inference synchronously to AI /predict/video. */
   @Post('video')
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'video', maxCount: 1 }], { limits: { fileSize: 200 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileFieldsInterceptor([{ name: 'video', maxCount: 1 }], {
+      limits: { fileSize: 200 * 1024 * 1024 },
+    }),
+  )
   async analyzeVideo(
     @UploadedFiles() files: { video?: ModelUpload[] } | undefined,
     @Body('meta') metaJson: string | undefined,
@@ -93,7 +89,10 @@ export class FramesController {
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
     FileFieldsInterceptor(
-      [{ name: 'video', maxCount: 1 }, { name: 'landmarks', maxCount: 1 }],
+      [
+        { name: 'video', maxCount: 1 },
+        { name: 'landmarks', maxCount: 1 },
+      ],
       { limits: { fileSize: 200 * 1024 * 1024, files: 2 } },
     ),
   )
@@ -121,15 +120,6 @@ export class FramesController {
     @Param('sessionId', new ParseUUIDPipe({ version: '4' })) sessionId: string,
   ): Promise<EngagementResultDto[]> {
     return this.framesService.flushSession(sessionId);
-  }
-
-  private applyVerifiedUser(
-    dto: { userEmail: string | null; userId: string | null },
-    user?: AuthenticatedUser,
-  ) {
-    if (!user) return;
-    if (user.email) dto.userEmail = user.email;
-    if (user.sub) dto.userId = user.sub;
   }
 
   private parseMeta(raw?: string): Record<string, unknown> {

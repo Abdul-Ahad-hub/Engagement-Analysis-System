@@ -7,7 +7,7 @@ import {
   Unique,
 } from 'typeorm';
 
-/** One analyzed capture window (16 frames, ~10 s) of one recording session. */
+/** One analyzed capture window (16 frames, ~10 s) of one capture session. */
 @Entity('engagement_records')
 @Unique('uq_engagement_records_session_window', ['sessionId', 'windowIndex'])
 export class EngagementRecord {
@@ -17,17 +17,6 @@ export class EngagementRecord {
   @Index()
   @Column({ type: 'uuid' })
   sessionId!: string;
-
-  @Index()
-  @Column({ type: 'varchar', nullable: true })
-  meetingId!: string | null;
-
-  @Index()
-  @Column({ type: 'varchar', nullable: true })
-  userEmail!: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  userName!: string | null;
 
   @Column({ type: 'int' })
   windowIndex!: number;

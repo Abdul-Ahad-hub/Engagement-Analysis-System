@@ -1,14 +1,10 @@
 /**
- * Shape returned to the frontend after a window has been analyzed
- * and buffered. Kept separate from the entity so the API contract
- * doesn't leak internal storage columns.
+ * Domain-agnostic shape returned after a capture window has been analyzed
+ * and buffered.
  */
 export class EngagementResultDto {
   id!: string;
   sessionId!: string;
-  meetingId!: string | null;
-  userEmail!: string | null;
-  userName!: string | null;
   windowIndex!: number;
   /** null when the model was not called (see `status`). */
   engagementScore!: number | null;
